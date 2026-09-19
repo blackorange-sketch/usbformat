@@ -44,8 +44,5 @@ dependencies {
     implementation("androidx.compose.material3:material3")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.9.0")
 
-    // Only used for raw USB Mass Storage access (SCSI over Bulk-Only Transport).
-    implementation("me.jahnen.libaums:core:0.10.0")
-
     testImplementation("junit:junit:4.13.2")
 }

@@ -65,9 +65,7 @@ import dev.usbformat.fmt.Inspector
 import dev.usbformat.fmt.Options
 import dev.usbformat.fmt.Scheme
 import dev.usbformat.fmt.TableType
-import dev.usbformat.usb.UsbDisk
-import me.jahnen.libaums.core.UsbMassStorageDevice
-import java.io.IOException
+import dev.usbformat.usb.UsbDisks
 import java.util.concurrent.atomic.AtomicBoolean
 import kotlin.concurrent.thread
 
@@ -207,10 +205,7 @@ class MainActivity : ComponentActivity() {
             info = InfoState.Loading
             thread(name = "usb-inspect") {
                 info = try {
-                    val found = UsbMassStorageDevice.getMassStorageDevices(this)
-                        .firstOrNull { it.usbDevice.deviceName == id }
-                        ?: throw IOException(getString(R.string.error_not_found))
-                    InfoState.Ready(UsbDisk(found).use { Inspector.inspect(it) })
+                    InfoState.Ready(UsbDisks.open(usb, device).use { Inspector.inspect(it) })
                 } catch (e: Throwable) {
                     InfoState.Failed(e.message ?: e.javaClass.simpleName)
                 } finally {

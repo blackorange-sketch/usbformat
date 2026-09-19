@@ -20,8 +20,8 @@ import dev.usbformat.fmt.Fs
 import dev.usbformat.fmt.Options
 import dev.usbformat.fmt.Phase
 import dev.usbformat.fmt.Scheme
-import dev.usbformat.usb.UsbDisk
-import me.jahnen.libaums.core.UsbMassStorageDevice
+import android.hardware.usb.UsbManager
+import dev.usbformat.usb.UsbDisks
 import java.io.IOException
 import java.util.concurrent.CancellationException
 import kotlin.concurrent.thread
@@ -90,11 +90,11 @@ class FormatService : Service() {
         wakeLock.acquire(12L * 60 * 60 * 1000)
 
         try {
-            val device = UsbMassStorageDevice.getMassStorageDevices(this)
-                .firstOrNull { it.usbDevice.deviceName == deviceName }
+            val manager = getSystemService(USB_SERVICE) as UsbManager
+            val device = manager.deviceList[deviceName]
                 ?: throw IOException(getString(R.string.error_not_found))
 
-            UsbDisk(device).use { disk ->
+            UsbDisks.open(manager, device).use { disk ->
                 var currentPhase: Phase? = null
                 var phaseStart = 0L
                 var phaseStartDone = 0L

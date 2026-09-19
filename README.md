@@ -1,7 +1,7 @@
 # USB Format
 
 A minimalist Android app that formats a USB flash drive, a small Rufus-like tool for the phone.
-No root needed: the drive is accessed directly through the Android USB Host API (SCSI over Bulk-Only Transport, via [libaums](https://github.com/magnusja/libaums)).
+No root needed: the drive is accessed directly through the Android USB Host API, with a small built-in SCSI-over-Bulk-Only-Transport layer (no third-party USB library).
 
 ## What it does (v0.1)
 
@@ -25,7 +25,8 @@ app/src/main/java/dev/usbformat/
   fmt/Eraser.kt           zero pass and write/verify pass
   fmt/FormatJob.kt        the whole operation
   fmt/Inspector.kt        reads the partition table and file systems of a drive
-  usb/UsbDisk.kt          libaums adapter (the only file that touches libaums)
+  usb/ScsiDisk.kt         SCSI over Bulk-Only Transport as a Disk (plain JVM, tested with a fake drive)
+  usb/UsbDisks.kt         Android USB Host transport for it
   FormatService.kt        foreground service
   MainActivity.kt         Compose UI
 ```
