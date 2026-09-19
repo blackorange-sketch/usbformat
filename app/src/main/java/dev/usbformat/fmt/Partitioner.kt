@@ -10,7 +10,7 @@ enum class Scheme { MBR, GPT }
 enum class Fs { FAT32, EXFAT }
 
 /** The single partition created on the drive, in sectors. */
-class Region(val startLba: Long, val sectors: Long)
+class Region(val startLba: Long, val sectors: Long, val firstSector: ByteArray = ByteArray(0))
 
 /** Writes a fresh MBR or GPT with one partition that spans the drive, aligned to 1 MiB. */
 object Partitioner {
@@ -44,18 +44,19 @@ object Partitioner {
         require(size > 0) { "The drive is too small" }
 
         // Remove leftovers of any previous table: the first MiB and the last MiB (old backup GPT).
-        disk.zero(0, start)
+        // Sector 0 is written last (see FormatJob): the drive then holds a complete file system before the table points to it.
+        disk.zero(1, start - 1)
         val tail = minOf(align, total - start)
         disk.zero(total - tail, tail)
 
-        when (scheme) {
-            Scheme.MBR -> writeMbr(disk, start, size, if (fs == Fs.FAT32) 0x0C else 0x07)
+        val firstSector = when (scheme) {
+            Scheme.MBR -> buildMbr(disk, start, size, if (fs == Fs.FAT32) 0x0C else 0x07)
             Scheme.GPT -> writeGpt(disk, start, size, entrySectors, firstUsable, lastUsable)
         }
-        return Region(start, size)
+        return Region(start, size, firstSector)
     }
 
-    private fun writeMbr(disk: Disk, start: Long, size: Long, type: Int) {
+    private fun buildMbr(disk: Disk, start: Long, size: Long, type: Int): ByteArray {
         val s = ByteArray(disk.sectorSize)
         // Windows identifies disks by this signature, so it must not be zero.
         val signature = (SecureRandom().nextInt().toLong() and 0xFFFFFFFFL) or 1L
@@ -68,9 +69,10 @@ object Partitioner {
         s.putLe32(o + 12, size)
         s[510] = 0x55
         s[511] = 0xAA.toByte()
-        disk.write(0, s)
+        return s
     }
 
+    /** Writes everything except sector 0 and returns the protective MBR for it. */
     private fun writeGpt(
         disk: Disk,
         start: Long,
@@ -78,7 +80,7 @@ object Partitioner {
         entrySectors: Long,
         firstUsable: Long,
         lastUsable: Long,
-    ) {
+    ): ByteArray {
         val ss = disk.sectorSize
         val last = disk.sectorCount - 1
 
@@ -91,7 +93,6 @@ object Partitioner {
         pmbr.putLe32(446 + 12, minOf(last, 0xFFFFFFFFL))
         pmbr[510] = 0x55
         pmbr[511] = 0xAA.toByte()
-        disk.write(0, pmbr)
 
         val entries = ByteArray(ENTRY_COUNT * ENTRY_SIZE)
         entries.putBytes(0, BASIC_DATA_GUID)
@@ -125,6 +126,7 @@ object Partitioner {
         disk.write(1, header(1L, last, 2L))
         disk.write(last - entrySectors, entries)
         disk.write(last, header(last, 1L, last - entrySectors))
+        return pmbr
     }
 
     private fun crc(data: ByteArray, length: Int): Long {

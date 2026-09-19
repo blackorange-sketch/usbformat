@@ -11,6 +11,8 @@ import android.hardware.usb.UsbConstants
 import android.hardware.usb.UsbDevice
 import android.hardware.usb.UsbManager
 import android.os.Build
+import android.os.Environment
+import android.os.storage.StorageManager
 import android.widget.Toast
 import android.os.Bundle
 import androidx.activity.ComponentActivity
@@ -74,6 +76,7 @@ import dev.usbformat.fmt.TableType
 import dev.usbformat.log.AppLog
 import dev.usbformat.usb.UsbSession
 import java.util.concurrent.atomic.AtomicBoolean
+import java.io.File
 import kotlin.concurrent.thread
 
 data class Drive(val id: String, val title: String, val detail: String)
@@ -82,11 +85,13 @@ class MainActivity : ComponentActivity() {
 
     companion object {
         const val ACTION_PERMISSION = "dev.usbformat.USB_PERMISSION"
+        private var crashReporterInstalled = false
     }
 
     private lateinit var usb: UsbManager
     private var drives by mutableStateOf(emptyList<Drive>())
     private var afterPermission: (() -> Unit)? = null
+    private var androidMounted by mutableStateOf(false)
     private var inspectedId: String? = null
     private val inspecting = AtomicBoolean(false)
 
@@ -114,6 +119,7 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
+        installCrashReporter()
         usb = getSystemService(USB_SERVICE) as UsbManager
 
         val filter = IntentFilter().apply {
@@ -144,6 +150,7 @@ class MainActivity : ComponentActivity() {
                     infoBefore = infoBefore,
                     onInspect = { id -> inspect(id) },
                     sessionOpen = sessionOpen,
+                    androidMounted = androidMounted,
                     onRelease = { releaseSession() },
                     onFormat = { id, options -> startFormat(id, options) },
                     onCancel = { FormatState.cancel.requested = true },
@@ -171,7 +178,41 @@ class MainActivity : ComponentActivity() {
         FormatState.info.value = InfoState.None
     }
 
+    /**
+     * If the app dies, the reason and the last log lines are saved and shown in the log on the next start,
+     * so that a crash can be reported without adb.
+     */
+    private fun installCrashReporter() {
+        val file = File(filesDir, "last-crash.txt")
+        if (file.exists()) {
+            AppLog.log("--- the previous run crashed; details follow ---")
+            try {
+                file.readLines().forEach { AppLog.log(it) }
+            } catch (e: Exception) {
+                AppLog.log("could not read the crash file: ${e.message}")
+            }
+            file.delete()
+        }
+        if (crashReporterInstalled) return
+        crashReporterInstalled = true
+        val previous = Thread.getDefaultUncaughtExceptionHandler()
+        Thread.setDefaultUncaughtExceptionHandler { thread, error ->
+            try {
+                file.writeText(
+                    "CRASH in thread ${thread.name}\n" + error.stackTraceToString() + "--- last log lines ---\n" + AppLog.tail(80),
+                )
+            } catch (e: Throwable) {
+                // nothing more can be done
+            }
+            previous?.uncaughtException(thread, error)
+        }
+    }
+
     private fun refresh() {
+        val storage = getSystemService(STORAGE_SERVICE) as StorageManager
+        androidMounted = storage.storageVolumes.any {
+            it.isRemovable && !it.isPrimary && it.state == Environment.MEDIA_MOUNTED
+        }
         drives = usb.deviceList.values
             .filter { d ->
                 (0 until d.interfaceCount).any {
@@ -287,6 +328,7 @@ private fun MainScreen(
     infoBefore: DriveInfo?,
     onInspect: (String) -> Unit,
     sessionOpen: Boolean,
+    androidMounted: Boolean,
     onRelease: () -> Unit,
     onFormat: (String, Options) -> Unit,
     onCancel: () -> Unit,
@@ -348,6 +390,7 @@ private fun MainScreen(
                         }
                     }
                     OutlinedButton(onClick = onRefresh) { Text(stringResource(R.string.refresh)) }
+                    if (androidMounted && !sessionOpen) Hint(stringResource(R.string.android_mounted))
                 }
 
                 if (current != null) {

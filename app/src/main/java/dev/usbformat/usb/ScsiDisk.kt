@@ -27,9 +27,6 @@ interface UsbTransport {
 
     /** GET_STATUS of a bulk endpoint: bit 0 set means halted. -1 if unavailable. */
     fun endpointStatus(inEndpoint: Boolean): Int = -1
-
-    /** Switches to a different way of moving bulk data. True if it was switched, false if there is none left. */
-    fun useAlternateTransfers(): Boolean = false
 }
 
 /** The drive stopped answering even after every kind of reset; it has to be unplugged and plugged in again. */
@@ -160,11 +157,7 @@ class ScsiDisk(
                     log("$what: using ${ramp.bytes} bytes per command from now on")
                 } else {
                     errorsAtMinimum++
-                    if (errorsAtMinimum == 2 && transport.useAlternateTransfers()) {
-                        log("$what: switching to the alternative USB transfer method")
-                    } else if (errorsAtMinimum > 3) {
-                        throw e
-                    }
+                    if (errorsAtMinimum > 3) throw e
                 }
                 Thread.sleep(300)
                 continue

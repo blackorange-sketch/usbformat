@@ -53,7 +53,13 @@ object UsbSession {
                     return@thread
                 }
                 if (disk !== target) return@thread
-                if (target.ping()) {
+                val answered = try {
+                    target.ping()
+                } catch (e: Throwable) {
+                    AppLog.log("session: keep-alive error: ${e.javaClass.simpleName}: ${e.message}")
+                    false
+                }
+                if (answered) {
                     failures = 0
                 } else if (++failures >= 2) {
                     AppLog.log("session: keep-alive got no answer twice; stopping it")

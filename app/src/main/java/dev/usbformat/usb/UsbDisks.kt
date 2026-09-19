@@ -6,18 +6,8 @@ import android.hardware.usb.UsbDeviceConnection
 import android.hardware.usb.UsbEndpoint
 import android.hardware.usb.UsbInterface
 import android.hardware.usb.UsbManager
-import android.hardware.usb.UsbRequest
-import android.os.Build
 import dev.usbformat.log.AppLog
 import java.io.IOException
-import java.nio.ByteBuffer
-import java.util.concurrent.TimeoutException
-
-/** Remembered for the whole process: once the alternative transfer method was needed, later connections start with it. */
-object AlternateTransfers {
-    @Volatile
-    var enabled = false
-}
 
 private class AndroidUsbTransport(
     private val connection: UsbDeviceConnection,
@@ -30,56 +20,15 @@ private class AndroidUsbTransport(
     private var lastOut = 0
     private var lastIn = 0
     private var lastControl = 0
-    private var useRequests = AlternateTransfers.enabled
 
     override fun bulkOut(data: ByteArray, offset: Int, length: Int, timeoutMs: Int): Int {
-        lastOut = if (useRequests) {
-            viaRequest(outEndpoint, data, offset, length, timeoutMs)
-        } else {
-            connection.bulkTransfer(outEndpoint, data, offset, length, timeoutMs)
-        }
+        lastOut = connection.bulkTransfer(outEndpoint, data, offset, length, timeoutMs)
         return lastOut
     }
 
     override fun bulkIn(buffer: ByteArray, offset: Int, length: Int, timeoutMs: Int): Int {
-        lastIn = if (useRequests) {
-            viaRequest(inEndpoint, buffer, offset, length, timeoutMs)
-        } else {
-            connection.bulkTransfer(inEndpoint, buffer, offset, length, timeoutMs)
-        }
+        lastIn = connection.bulkTransfer(inEndpoint, buffer, offset, length, timeoutMs)
         return lastIn
-    }
-
-    /**
-     * The other way to move bulk data: queued UsbRequests instead of blocking bulkTransfer(). It goes through a
-     * different path in the kernel and works on some phones where the plain one does not.
-     */
-    private fun viaRequest(endpoint: UsbEndpoint, data: ByteArray, offset: Int, length: Int, timeoutMs: Int): Int {
-        if (Build.VERSION.SDK_INT < 26) return -1
-        val request = UsbRequest()
-        try {
-            if (!request.initialize(connection, endpoint)) return -1
-            val buffer = ByteBuffer.wrap(data, offset, length)
-            if (!request.queue(buffer)) return -1
-            val finished = try {
-                connection.requestWait(timeoutMs.toLong())
-            } catch (e: TimeoutException) {
-                request.cancel()
-                return -1
-            }
-            if (finished !== request) return -1
-            val moved = buffer.position() - offset
-            return if (moved == 0) length else moved
-        } finally {
-            request.close()
-        }
-    }
-
-    override fun useAlternateTransfers(): Boolean {
-        if (useRequests || Build.VERSION.SDK_INT < 26) return false
-        useRequests = true
-        AlternateTransfers.enabled = true
-        return true
     }
 
     override fun describe(): String = "$openLog; out=$lastOut in=$lastIn ctl=$lastControl"
@@ -87,6 +36,7 @@ private class AndroidUsbTransport(
     /**
      * CLEAR_FEATURE(ENDPOINT_HALT) only resets the drive's side. Selecting the interface again (SET_INTERFACE)
      * makes the host controller reset its endpoint state too, which is what a proper clear-halt does.
+     * Only used once something has already gone wrong.
      */
     override fun clearHalt(inEndpoint: Boolean) {
         clearHaltOnDrive(if (inEndpoint) this.inEndpoint else outEndpoint)
@@ -98,9 +48,8 @@ private class AndroidUsbTransport(
     }
 
     override fun reset() {
-        // Bulk-Only Mass Storage Reset, class request 0xFF addressed to the interface.
+        // Bulk-Only Mass Storage Reset, class request 0xFF addressed to the interface, then clear both halts.
         lastControl = connection.controlTransfer(0x21, 0xFF, 0, usbInterface.id, null, 0, 1000)
-        connection.setInterface(usbInterface)
         clearHaltOnDrive(inEndpoint)
         clearHaltOnDrive(outEndpoint)
     }
@@ -183,10 +132,7 @@ object UsbDisks {
         AppLog.log("usb: $openLog")
         val transport = AndroidUsbTransport(connection, usbInterface, inEndpoint, outEndpoint, openLog)
         try {
-            // Start from a known state: Bulk-Only reset, then clear both endpoints.
-            transport.reset()
-            AppLog.log("usb: reset done (${transport.describe()})")
-            Thread.sleep(100)
+            // No reset here: the drive is only reset if it fails to answer (see ScsiDisk).
             return ScsiDisk(transport, ioTimeoutMs)
         } catch (e: Throwable) {
             transport.close()

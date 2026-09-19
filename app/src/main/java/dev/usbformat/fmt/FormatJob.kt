@@ -35,6 +35,10 @@ object FormatJob {
             Fs.FAT32 -> Fat32Formatter.format(disk, region, options.label)
             Fs.EXFAT -> ExFatFormatter.format(disk, region, options.label)
         }
+        if (region.firstSector.isNotEmpty()) {
+            AppLog.log("writing sector 0")
+            disk.write(0, region.firstSector)
+        }
         AppLog.log("flushing")
         disk.flush()
         AppLog.log("format finished")

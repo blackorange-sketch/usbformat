@@ -66,4 +66,6 @@
 
     <string name="session_held">The app is holding the drive, so Android does not mount it. Release it (or unplug it) when you are done.</string>
     <string name="release_button">Release drive</string>
+
+    <string name="android_mounted">Android has a drive mounted. Eject it first (Settings, Storage, the USB drive, Eject), then read or format it here. Otherwise the drive may stop responding.</string>
 </resources>
