@@ -5,10 +5,12 @@ import dev.usbformat.disk.MIB
 import dev.usbformat.fmt.Cancel
 import dev.usbformat.fmt.EraseMode
 import dev.usbformat.fmt.FormatJob
+import dev.usbformat.fmt.Inspector
 import dev.usbformat.fmt.Fs
 import dev.usbformat.fmt.Options
 import dev.usbformat.fmt.Region
 import dev.usbformat.fmt.Scheme
+import dev.usbformat.fmt.TableType
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -30,6 +32,17 @@ class ImageGenerationTest {
 
         val region = FileDisk(img.path, sectorSize).use { disk ->
             FormatJob.run(disk, Options(scheme, fs, "TEST", EraseMode.QUICK), Cancel()) { _, _, _ -> }
+        }
+
+        // The inspector must report exactly what was just written.
+        FileDisk(img.path, sectorSize).use { disk ->
+            val info = Inspector.inspect(disk)
+            assertEquals(if (scheme == Scheme.GPT) TableType.GPT else TableType.MBR, info.table)
+            assertEquals(1, info.partitions.size)
+            assertEquals(if (fs == Fs.FAT32) "FAT32" else "exFAT", info.partitions[0].fs)
+            assertEquals(region.startLba, info.partitions[0].startLba)
+            assertEquals(region.sectors, info.partitions[0].sectors)
+            assertEquals(sizeMiB * MIB / sectorSize, info.sectorCount)
         }
 
         if (sectorSize == 512) {
@@ -69,6 +82,18 @@ class ImageGenerationTest {
                 val region = generate(scheme, fs, 4096, 512)
                 assertEquals(256L, region.startLba)
             }
+        }
+    }
+
+    @Test
+    fun blankDriveHasNoTable() {
+        val img = File(dir, "blank.img")
+        img.delete()
+        RandomAccessFile(img, "rw").use { it.setLength(32L * MIB) }
+        FileDisk(img.path, 512).use { disk ->
+            val info = Inspector.inspect(disk)
+            assertEquals(TableType.NONE, info.table)
+            assertTrue(info.partitions.isEmpty())
         }
     }
 

@@ -45,4 +45,16 @@
 
     <string name="notification_title">Formatting USB drive</string>
     <string name="notification_channel">Formatting progress</string>
+
+    <string name="section_info">Drive info</string>
+    <string name="info_capacity">Capacity: %1$s (sector %2$d B)</string>
+    <string name="info_table">Partition table: %1$s</string>
+    <string name="info_table_none">none</string>
+    <string name="info_no_partitions">No partitions</string>
+    <string name="info_partition">Partition %1$d: %2$s · %3$s · starts at %4$s</string>
+    <string name="info_loading">Reading the drive…</string>
+    <string name="info_failed">Could not read the drive: %1$s</string>
+    <string name="info_reread">Read again</string>
+    <string name="info_before">Before: %1$s</string>
+    <string name="fs_unknown">unknown</string>
 </resources>

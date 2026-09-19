@@ -8,6 +8,7 @@ No root needed: the drive is accessed directly through the Android USB Host API 
 - Partition scheme: **MBR** or **GPT**, one partition, aligned to 1 MiB
 - File system: **FAT32** (any size, not limited to 32 GiB) or **exFAT**
 - Erase modes: **quick**, **full (zeros)**, **full + test** (writes a unique pattern to every sector and reads it back: finds bad blocks and fake-capacity drives)
+- Shows what is on the selected drive: capacity, partition table (MBR / GPT / none) and the file system of each partition. It is read when the drive is picked and again after formatting, together with a "Before" line for comparison
 - Runs in a foreground service with a wake lock, so a long erase survives the screen turning off
 - UI languages: English, Ukrainian
 
@@ -23,6 +24,7 @@ app/src/main/java/dev/usbformat/
   fmt/ExFatFormatter.kt   exFAT
   fmt/Eraser.kt           zero pass and write/verify pass
   fmt/FormatJob.kt        the whole operation
+  fmt/Inspector.kt        reads the partition table and file systems of a drive
   usb/UsbDisk.kt          libaums adapter (the only file that touches libaums)
   FormatService.kt        foreground service
   MainActivity.kt         Compose UI

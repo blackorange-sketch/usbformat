@@ -45,4 +45,16 @@
 
     <string name="notification_title">Форматування USB-накопичувача</string>
     <string name="notification_channel">Хід форматування</string>
+
+    <string name="section_info">Інформація про накопичувач</string>
+    <string name="info_capacity">Обсяг: %1$s (сектор %2$d Б)</string>
+    <string name="info_table">Таблиця розділів: %1$s</string>
+    <string name="info_table_none">немає</string>
+    <string name="info_no_partitions">Розділів немає</string>
+    <string name="info_partition">Розділ %1$d: %2$s · %3$s · починається з %4$s</string>
+    <string name="info_loading">Читання накопичувача…</string>
+    <string name="info_failed">Не вдалося прочитати накопичувач: %1$s</string>
+    <string name="info_reread">Прочитати ще раз</string>
+    <string name="info_before">Було: %1$s</string>
+    <string name="fs_unknown">невідома</string>
 </resources>

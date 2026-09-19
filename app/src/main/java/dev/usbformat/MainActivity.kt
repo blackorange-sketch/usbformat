@@ -44,6 +44,7 @@ import androidx.compose.material3.dynamicDarkColorScheme
 import androidx.compose.material3.dynamicLightColorScheme
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -57,10 +58,18 @@ import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import dev.usbformat.fmt.DriveInfo
 import dev.usbformat.fmt.EraseMode
 import dev.usbformat.fmt.Fs
+import dev.usbformat.fmt.Inspector
 import dev.usbformat.fmt.Options
 import dev.usbformat.fmt.Scheme
+import dev.usbformat.fmt.TableType
+import dev.usbformat.usb.UsbDisk
+import me.jahnen.libaums.core.UsbMassStorageDevice
+import java.io.IOException
+import java.util.concurrent.atomic.AtomicBoolean
+import kotlin.concurrent.thread
 
 data class Drive(val id: String, val title: String, val detail: String)
 
@@ -73,6 +82,10 @@ class MainActivity : ComponentActivity() {
     private lateinit var usb: UsbManager
     private var drives by mutableStateOf(emptyList<Drive>())
     private var afterPermission: (() -> Unit)? = null
+    private var info by mutableStateOf<InfoState>(InfoState.None)
+    private var infoBefore by mutableStateOf<DriveInfo?>(null)
+    private var inspectedId: String? = null
+    private val inspecting = AtomicBoolean(false)
 
     private val usbEvents = object : BroadcastReceiver() {
         override fun onReceive(context: Context, intent: Intent) {
@@ -80,7 +93,11 @@ class MainActivity : ComponentActivity() {
                 val granted = intent.getBooleanExtra(UsbManager.EXTRA_PERMISSION_GRANTED, false)
                 val next = afterPermission
                 afterPermission = null
-                if (granted) next?.invoke()
+                if (granted) {
+                    next?.invoke()
+                } else {
+                    info = InfoState.None
+                }
             } else {
                 refresh()
             }
@@ -113,6 +130,9 @@ class MainActivity : ComponentActivity() {
                     drives = drives,
                     status = status,
                     onRefresh = { refresh() },
+                    info = info,
+                    infoBefore = infoBefore,
+                    onInspect = { id -> inspect(id) },
                     onFormat = { id, options -> startFormat(id, options) },
                     onCancel = { FormatState.cancel.requested = true },
                     onDismiss = { FormatState.status.value = FormatStatus.Idle },
@@ -156,27 +176,12 @@ class MainActivity : ComponentActivity() {
         return name.ifBlank { "USB drive" }
     }
 
-    private fun startFormat(id: String, options: Options) {
-        val device = usb.deviceList[id]
-        if (device == null) {
-            refresh()
-            return
-        }
-        val start: () -> Unit = {
-            ContextCompat.startForegroundService(
-                this,
-                Intent(this, FormatService::class.java)
-                    .putExtra(FormatService.EXTRA_DEVICE, id)
-                    .putExtra(FormatService.EXTRA_SCHEME, options.scheme.name)
-                    .putExtra(FormatService.EXTRA_FS, options.fs.name)
-                    .putExtra(FormatService.EXTRA_MODE, options.mode.name)
-                    .putExtra(FormatService.EXTRA_LABEL, options.label),
-            )
-        }
+    /** Runs [action] once USB permission for [device] is available (asking for it if needed). */
+    private fun withPermission(device: UsbDevice, action: () -> Unit) {
         if (usb.hasPermission(device)) {
-            start()
+            action()
         } else {
-            afterPermission = start
+            afterPermission = action
             // The system fills in the extras, so this PendingIntent has to be mutable on Android 12+.
             val flags = if (Build.VERSION.SDK_INT >= 31) PendingIntent.FLAG_MUTABLE else 0
             val pending = PendingIntent.getBroadcast(
@@ -186,6 +191,53 @@ class MainActivity : ComponentActivity() {
                 flags,
             )
             usb.requestPermission(device, pending)
+        }
+    }
+
+    /** Reads the partition table and file systems of the drive. Opening the drive makes Android unmount it briefly. */
+    private fun inspect(id: String) {
+        if (FormatState.status.value is FormatStatus.Running) return
+        val device = usb.deviceList[id] ?: return
+        if (inspectedId != id) {
+            inspectedId = id
+            infoBefore = null
+        }
+        withPermission(device) {
+            if (!inspecting.compareAndSet(false, true)) return@withPermission
+            info = InfoState.Loading
+            thread(name = "usb-inspect") {
+                info = try {
+                    val found = UsbMassStorageDevice.getMassStorageDevices(this)
+                        .firstOrNull { it.usbDevice.deviceName == id }
+                        ?: throw IOException(getString(R.string.error_not_found))
+                    InfoState.Ready(UsbDisk(found).use { Inspector.inspect(it) })
+                } catch (e: Throwable) {
+                    InfoState.Failed(e.message ?: e.javaClass.simpleName)
+                } finally {
+                    inspecting.set(false)
+                }
+            }
+        }
+    }
+
+    private fun startFormat(id: String, options: Options) {
+        val device = usb.deviceList[id]
+        if (device == null) {
+            refresh()
+            return
+        }
+        // Remember what the drive looked like, so the result can be compared with it.
+        infoBefore = (info as? InfoState.Ready)?.info
+        withPermission(device) {
+            ContextCompat.startForegroundService(
+                this,
+                Intent(this, FormatService::class.java)
+                    .putExtra(FormatService.EXTRA_DEVICE, id)
+                    .putExtra(FormatService.EXTRA_SCHEME, options.scheme.name)
+                    .putExtra(FormatService.EXTRA_FS, options.fs.name)
+                    .putExtra(FormatService.EXTRA_MODE, options.mode.name)
+                    .putExtra(FormatService.EXTRA_LABEL, options.label),
+            )
         }
     }
 }
@@ -209,6 +261,9 @@ private fun MainScreen(
     drives: List<Drive>,
     status: FormatStatus,
     onRefresh: () -> Unit,
+    info: InfoState,
+    infoBefore: DriveInfo?,
+    onInspect: (String) -> Unit,
     onFormat: (String, Options) -> Unit,
     onCancel: () -> Unit,
     onDismiss: () -> Unit,
@@ -221,6 +276,12 @@ private fun MainScreen(
     var confirm by remember { mutableStateOf(false) }
 
     val current = drives.firstOrNull { it.id == selected } ?: drives.singleOrNull()
+
+    // Read the drive when it is picked, and again when a format job finishes.
+    val running = status is FormatStatus.Running
+    LaunchedEffect(current?.id, running) {
+        if (!running) current?.let { onInspect(it.id) }
+    }
 
     Scaffold { padding ->
         Column(
@@ -263,6 +324,29 @@ private fun MainScreen(
                         }
                     }
                     OutlinedButton(onClick = onRefresh) { Text(stringResource(R.string.refresh)) }
+                }
+
+                if (current != null) {
+                    Section(stringResource(R.string.section_info)) {
+                        when (info) {
+                            InfoState.None -> Unit
+                            InfoState.Loading ->
+                                Text(stringResource(R.string.info_loading), style = MaterialTheme.typography.bodyMedium)
+                            is InfoState.Ready -> InfoBlock(info.info)
+                            is InfoState.Failed ->
+                                Text(
+                                    stringResource(R.string.info_failed, info.message),
+                                    style = MaterialTheme.typography.bodyMedium,
+                                )
+                        }
+                        if (infoBefore != null) {
+                            Hint(stringResource(R.string.info_before, summary(infoBefore)))
+                        }
+                        OutlinedButton(
+                            onClick = { onInspect(current.id) },
+                            enabled = info !is InfoState.Loading,
+                        ) { Text(stringResource(R.string.info_reread)) }
+                    }
                 }
 
                 Section(stringResource(R.string.section_scheme)) {
@@ -318,7 +402,7 @@ private fun MainScreen(
 
                 Button(
                     onClick = { confirm = true },
-                    enabled = current != null,
+                    enabled = current != null && info !is InfoState.Loading,
                     modifier = Modifier.fillMaxWidth(),
                 ) {
                     Text(stringResource(R.string.format_button))
@@ -406,4 +490,48 @@ private fun formatEta(seconds: Long): String {
     val m = seconds % 3600 / 60
     val s = seconds % 60
     return if (h > 0) "%d:%02d:%02d".format(h, m, s) else "%d:%02d".format(m, s)
+}
+
+
+@Composable
+private fun InfoBlock(info: DriveInfo) {
+    val unknown = stringResource(R.string.fs_unknown)
+    val style = MaterialTheme.typography.bodyMedium
+    Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+        Text(
+            stringResource(R.string.info_capacity, formatSize(info.sectorCount * info.sectorSize), info.sectorSize),
+            style = style,
+        )
+        Text(stringResource(R.string.info_table, tableName(info.table)), style = style)
+        if (info.partitions.isEmpty()) {
+            Text(stringResource(R.string.info_no_partitions), style = style)
+        }
+        info.partitions.forEach { p ->
+            Text(
+                stringResource(
+                    R.string.info_partition,
+                    p.index,
+                    p.fs ?: unknown,
+                    formatSize(p.sectors * info.sectorSize),
+                    formatSize(p.startLba * info.sectorSize),
+                ),
+                style = style,
+            )
+        }
+    }
+}
+
+@Composable
+private fun tableName(table: TableType): String = when (table) {
+    TableType.MBR -> "MBR"
+    TableType.GPT -> "GPT"
+    TableType.NONE -> stringResource(R.string.info_table_none)
+}
+
+/** One line such as "GPT · exFAT · 29.72 GiB (31.91 GB)". */
+@Composable
+private fun summary(info: DriveInfo): String {
+    val unknown = stringResource(R.string.fs_unknown)
+    val fs = info.partitions.joinToString(" + ") { it.fs ?: unknown }.ifEmpty { "-" }
+    return "${tableName(info.table)} · $fs · ${formatSize(info.sectorCount * info.sectorSize)}"
 }
