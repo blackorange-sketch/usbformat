@@ -27,6 +27,9 @@ interface UsbTransport {
 
     /** GET_STATUS of a bulk endpoint: bit 0 set means halted. -1 if unavailable. */
     fun endpointStatus(inEndpoint: Boolean): Int = -1
+
+    /** Switches to a different way of moving bulk data. True if it was switched, false if there is none left. */
+    fun useAlternateTransfers(): Boolean = false
 }
 
 /** The drive stopped answering even after every kind of reset; it has to be unplugged and plugged in again. */
@@ -48,9 +51,8 @@ class ScsiDisk(
         const val COMMAND_TIMEOUT_MS = 5_000 // sending a 31-byte command block should be instant
         const val INIT_TIMEOUT_MS = 5_000 // while waiting for the drive to come up
         const val CHUNK = 16 * 1024 // per bulk transfer; a multiple of every bulk packet size
-        const val MIN_CHUNK = 1024
+        const val RAMP_START = 512
         const val MAX_COMMAND_BYTES = 64 * 1024 // per SCSI command; cheap controllers dislike more
-        const val MIN_COMMAND_BYTES = 4 * 1024
         const val LOGGED_READ_WRITES = 8
     }
 
@@ -58,10 +60,32 @@ class ScsiDisk(
 
     private class Sense(val key: Int, val asc: Int, val ascq: Int)
 
+    /**
+     * Command size that starts tiny and doubles after every success, up to [max]. After a failure it goes back to the
+     * last size that worked and stops growing, so a drive or phone that cannot take big transfers still works.
+     */
+    private class Ramp(private val min: Int, private val max: Int) {
+        var bytes = min
+            private set
+        private var limited = false
+
+        fun success() {
+            if (!limited && bytes < max) bytes = minOf(max, bytes * 2)
+        }
+
+        /** False when the size was already at the minimum. */
+        fun failure(): Boolean {
+            limited = true
+            if (bytes <= min) return false
+            bytes = maxOf(min, bytes / 2)
+            return true
+        }
+    }
+
     private var tag = 1L
     private var readWritesLogged = 0
-    private var maxCommandBytes = MAX_COMMAND_BYTES
-    private var chunk = CHUNK
+    private var readRamp = Ramp(RAMP_START, MAX_COMMAND_BYTES)
+    private var writeRamp = Ramp(RAMP_START, MAX_COMMAND_BYTES)
     private var initializing = true
 
     override val sectorSize: Int
@@ -77,6 +101,7 @@ class ScsiDisk(
         sectorSize = blockSize
         sectorCount = blocks
         log("capacity: $blocks sectors of $blockSize bytes")
+        logDeviceInfo()
         initializing = false
     }
 
@@ -112,38 +137,81 @@ class ScsiDisk(
 
     private fun timeoutMs(): Int = if (initializing) INIT_TIMEOUT_MS else ioTimeoutMs
 
-    private fun maxSectors(): Int = maxOf(1, maxCommandBytes / sectorSize)
-
-    /** After an error, retry with smaller commands and smaller USB transfers: some controllers choke on big ones. */
-    private fun shrinkTransfers(): Boolean {
-        if (maxCommandBytes <= MIN_COMMAND_BYTES && chunk <= MIN_CHUNK) return false
-        maxCommandBytes = maxOf(MIN_COMMAND_BYTES, maxCommandBytes / 4)
-        chunk = maxOf(MIN_CHUNK, chunk / 4)
-        log("switching to smaller transfers: commands of $maxCommandBytes bytes, USB transfers of $chunk bytes")
-        return true
+    /** Keeps the link awake and checks the drive still answers. */
+    fun ping(): Boolean = try {
+        execute(ByteArray(6), true, null, 0, 0).status == 0 // TEST UNIT READY
+    } catch (e: IOException) {
+        false
     }
 
     private fun transferAll(write: Boolean, lba: Long, buf: ByteArray, count: Int) {
         val what = if (write) "write" else "read"
+        val ramp = if (write) writeRamp else readRamp
         var done = 0
         var errorsAtMinimum = 0
         while (done < count) {
-            val n = minOf(count - done, maxSectors())
+            val n = minOf(count - done, maxOf(1, ramp.bytes / sectorSize))
             try {
                 transferSectors(write, lba + done, n, buf, done * sectorSize)
             } catch (e: IOException) {
-                log("$what at sector ${lba + done} failed: ${e.message}")
+                log("$what of ${n * sectorSize} bytes at sector ${lba + done} failed: ${e.message}")
                 if (e is DriveUnresponsiveException) throw e
-                if (!shrinkTransfers()) {
+                if (ramp.failure()) {
+                    log("$what: using ${ramp.bytes} bytes per command from now on")
+                } else {
                     errorsAtMinimum++
-                    if (errorsAtMinimum > 2) throw e
+                    if (errorsAtMinimum == 2 && transport.useAlternateTransfers()) {
+                        log("$what: switching to the alternative USB transfer method")
+                    } else if (errorsAtMinimum > 3) {
+                        throw e
+                    }
                 }
                 Thread.sleep(300)
                 continue
             }
+            ramp.success()
             done += n
         }
     }
+
+    /** Writes what the drive says about itself to the log, and whether it reports write protection. */
+    private fun logDeviceInfo() {
+        try {
+            val inquiry = ByteArray(36)
+            val cdb = ByteArray(6)
+            cdb[0] = 0x12 // INQUIRY
+            cdb[4] = 36
+            val r = execute(cdb, true, inquiry, 0, 36)
+            if (r.status == 0 && r.transferred >= 32) {
+                log(
+                    "inquiry: type=${inquiry[0].toInt() and 0x1F} removable=${(inquiry[1].toInt() and 0x80) != 0} " +
+                        "vendor='${ascii(inquiry, 8, 8)}' product='${ascii(inquiry, 16, 16)}' revision='${ascii(inquiry, 32, 4)}'",
+                )
+            } else {
+                requestSense()
+            }
+        } catch (e: IOException) {
+            log("inquiry failed: ${e.message}")
+        }
+        try {
+            val header = ByteArray(4)
+            val cdb = ByteArray(6)
+            cdb[0] = 0x1A // MODE SENSE(6)
+            cdb[2] = 0x3F
+            cdb[4] = 4
+            val r = execute(cdb, true, header, 0, 4)
+            if (r.status == 0 && r.transferred >= 4) {
+                log("mode sense: write protected=${(header[2].toInt() and 0x80) != 0}")
+            } else {
+                requestSense()
+            }
+        } catch (e: IOException) {
+            log("mode sense failed: ${e.message}")
+        }
+    }
+
+    private fun ascii(b: ByteArray, offset: Int, length: Int): String =
+        String(b, offset, length, Charsets.US_ASCII).trim()
 
     private fun transferSectors(write: Boolean, lba: Long, sectors: Int, buf: ByteArray, offset: Int) {
         val cdb = if (lba + sectors <= 0xFFFFFFFFL) {
@@ -162,7 +230,7 @@ class ScsiDisk(
         val what = if (write) "write" else "read"
         val bytes = sectors * sectorSize
         for (attempt in 0 until 2) {
-            val r = execute(cdb, !write, buf, offset, bytes)
+            val r = execute(cdb, !write, buf, offset, bytes, minOf(CHUNK, bytes))
             if (r.status == 0 && r.transferred == bytes) return
             val sense = requestSense()
             log(
@@ -240,7 +308,14 @@ class ScsiDisk(
 
     /** One command block, optional data phase, then the status block. */
     @Synchronized
-    private fun execute(cdb: ByteArray, dataIn: Boolean, data: ByteArray?, offset: Int, length: Int): Result {
+    private fun execute(
+        cdb: ByteArray,
+        dataIn: Boolean,
+        data: ByteArray?,
+        offset: Int,
+        length: Int,
+        maxTransfer: Int = CHUNK,
+    ): Result {
         val op = cdb[0].toInt() and 0xFF
         val myTag = tag
         tag = (tag + 1) and 0xFFFFFFFFL
@@ -287,7 +362,7 @@ class ScsiDisk(
         if (length > 0 && data != null) {
             var failed = false
             while (moved < length) {
-                val want = minOf(chunk, length - moved)
+                val want = minOf(maxTransfer, length - moved)
                 val n = if (dataIn) {
                     transport.bulkIn(data, offset + moved, want, timeoutMs())
                 } else {
@@ -337,7 +412,8 @@ class ScsiDisk(
         val status = csw[12].toInt() and 0xFF
         val readWrite = op == 0x28 || op == 0x2A || op == 0x88 || op == 0x8A
         if (readWrite) readWritesLogged++
-        if (!readWrite || readWritesLogged <= LOGGED_READ_WRITES || status != 0 || moved != length) {
+        val routinePing = op == 0x00 && status == 0 && !initializing
+        if (!routinePing && (!readWrite || readWritesLogged <= LOGGED_READ_WRITES || status != 0 || moved != length)) {
             log("${opName(op)} ${if (dataIn) "in" else "out"} $length bytes -> status=$status moved=$moved")
         }
         return Result(status, moved)

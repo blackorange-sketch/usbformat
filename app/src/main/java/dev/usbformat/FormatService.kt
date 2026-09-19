@@ -99,6 +99,7 @@ class FormatService : Service() {
 
             run {
                 val usbDisk = UsbSession.acquire(manager, device, 30_000)
+                if (!usbDisk.ping()) AppLog.log("the drive did not answer the wake-up ping")
                 val disk = LoggingDisk(usbDisk)
                 var currentPhase: Phase? = null
                 var phaseStart = 0L

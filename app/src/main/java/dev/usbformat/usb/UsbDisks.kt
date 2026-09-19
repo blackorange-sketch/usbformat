@@ -6,8 +6,18 @@ import android.hardware.usb.UsbDeviceConnection
 import android.hardware.usb.UsbEndpoint
 import android.hardware.usb.UsbInterface
 import android.hardware.usb.UsbManager
+import android.hardware.usb.UsbRequest
+import android.os.Build
 import dev.usbformat.log.AppLog
 import java.io.IOException
+import java.nio.ByteBuffer
+import java.util.concurrent.TimeoutException
+
+/** Remembered for the whole process: once the alternative transfer method was needed, later connections start with it. */
+object AlternateTransfers {
+    @Volatile
+    var enabled = false
+}
 
 private class AndroidUsbTransport(
     private val connection: UsbDeviceConnection,
@@ -20,15 +30,56 @@ private class AndroidUsbTransport(
     private var lastOut = 0
     private var lastIn = 0
     private var lastControl = 0
+    private var useRequests = AlternateTransfers.enabled
 
     override fun bulkOut(data: ByteArray, offset: Int, length: Int, timeoutMs: Int): Int {
-        lastOut = connection.bulkTransfer(outEndpoint, data, offset, length, timeoutMs)
+        lastOut = if (useRequests) {
+            viaRequest(outEndpoint, data, offset, length, timeoutMs)
+        } else {
+            connection.bulkTransfer(outEndpoint, data, offset, length, timeoutMs)
+        }
         return lastOut
     }
 
     override fun bulkIn(buffer: ByteArray, offset: Int, length: Int, timeoutMs: Int): Int {
-        lastIn = connection.bulkTransfer(inEndpoint, buffer, offset, length, timeoutMs)
+        lastIn = if (useRequests) {
+            viaRequest(inEndpoint, buffer, offset, length, timeoutMs)
+        } else {
+            connection.bulkTransfer(inEndpoint, buffer, offset, length, timeoutMs)
+        }
         return lastIn
+    }
+
+    /**
+     * The other way to move bulk data: queued UsbRequests instead of blocking bulkTransfer(). It goes through a
+     * different path in the kernel and works on some phones where the plain one does not.
+     */
+    private fun viaRequest(endpoint: UsbEndpoint, data: ByteArray, offset: Int, length: Int, timeoutMs: Int): Int {
+        if (Build.VERSION.SDK_INT < 26) return -1
+        val request = UsbRequest()
+        try {
+            if (!request.initialize(connection, endpoint)) return -1
+            val buffer = ByteBuffer.wrap(data, offset, length)
+            if (!request.queue(buffer)) return -1
+            val finished = try {
+                connection.requestWait(timeoutMs.toLong())
+            } catch (e: TimeoutException) {
+                request.cancel()
+                return -1
+            }
+            if (finished !== request) return -1
+            val moved = buffer.position() - offset
+            return if (moved == 0) length else moved
+        } finally {
+            request.close()
+        }
+    }
+
+    override fun useAlternateTransfers(): Boolean {
+        if (useRequests || Build.VERSION.SDK_INT < 26) return false
+        useRequests = true
+        AlternateTransfers.enabled = true
+        return true
     }
 
     override fun describe(): String = "$openLog; out=$lastOut in=$lastIn ctl=$lastControl"
@@ -115,17 +166,18 @@ object UsbDisks {
         // Select the Bulk-Only alternate setting (drives that also speak UAS may be in another one).
         val setInterfaceOk = connection.setInterface(usbInterface)
         // Get Max LUN: drives with a single LUN may stall this, which is fine.
-        val maxLun = connection.controlTransfer(0xA1, 0xFE, 0, usbInterface.id, ByteArray(1), 1, 1000)
+        val lunBuffer = ByteArray(1)
+        val lunResult = connection.controlTransfer(0xA1, 0xFE, 0, usbInterface.id, lunBuffer, 1, 1000)
 
         val interfaces = (0 until device.interfaceCount).joinToString(",") {
             val i = device.getInterface(it)
             "${i.id}/${i.alternateSetting}:${i.interfaceClass}:${i.interfaceSubclass}:${i.interfaceProtocol}"
         }
         val openLog = "interfaces=$interfaces using ${usbInterface.id}/${usbInterface.alternateSetting}, " +
-            "out=0x%02x/%d in=0x%02x/%d, setIf=%b lun=%d".format(
+            "out=0x%02x/%d in=0x%02x/%d, setIf=%b maxLun=%d/%d".format(
                 outEndpoint.address, outEndpoint.maxPacketSize,
                 inEndpoint.address, inEndpoint.maxPacketSize,
-                setInterfaceOk, maxLun,
+                setInterfaceOk, lunResult, lunBuffer[0].toInt(),
             )
 
         AppLog.log("usb: $openLog")

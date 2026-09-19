@@ -4,6 +4,7 @@ import android.hardware.usb.UsbDevice
 import android.hardware.usb.UsbManager
 import dev.usbformat.log.AppLog
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlin.concurrent.thread
 
 /**
  * Keeps one drive open for as long as the app works with it.
@@ -18,6 +19,7 @@ object UsbSession {
 
     private var disk: ScsiDisk? = null
     private var deviceName: String? = null
+    private var keepAlive: Thread? = null
 
     /** Returns the open drive, opening it first if needed. May block for a long time; call from a worker thread. */
     @Synchronized
@@ -33,13 +35,40 @@ object UsbSession {
         deviceName = device.deviceName
         isOpen.value = true
         AppLog.log("session: drive claimed by the app")
+        startKeepAlive(fresh)
         return fresh
+    }
+
+    /**
+     * A harmless TEST UNIT READY every 1.5 s. Some drives fail their first transfer after the link has been idle
+     * for a few seconds (power saving on the USB link or in the drive); regular traffic prevents that.
+     */
+    private fun startKeepAlive(target: ScsiDisk) {
+        keepAlive = thread(name = "usb-keepalive", isDaemon = true) {
+            var failures = 0
+            while (true) {
+                try {
+                    Thread.sleep(1500)
+                } catch (e: InterruptedException) {
+                    return@thread
+                }
+                if (disk !== target) return@thread
+                if (target.ping()) {
+                    failures = 0
+                } else if (++failures >= 2) {
+                    AppLog.log("session: keep-alive got no answer twice; stopping it")
+                    return@thread
+                }
+            }
+        }
     }
 
     /** Gives the drive back to Android. Call from a worker thread: it waits for any open in progress. */
     @Synchronized
     fun release() {
         val current = disk ?: return
+        keepAlive?.interrupt()
+        keepAlive = null
         try {
             current.close()
         } catch (e: Exception) {

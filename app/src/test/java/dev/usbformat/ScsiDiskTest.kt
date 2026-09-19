@@ -93,6 +93,19 @@ class FakeTransport(
             0x88 -> read(readBe(cdb, 2, 8), readBe(cdb, 10, 4).toInt(), transferLength)
             0x2A -> startWrite(readBe(cdb, 2, 4), readBe(cdb, 7, 2).toInt(), transferLength)
             0x8A -> startWrite(readBe(cdb, 2, 8), readBe(cdb, 10, 4).toInt(), transferLength)
+            0x12 -> { // INQUIRY
+                val out = ByteArray(36)
+                out[1] = 0x80.toByte()
+                "FAKE    ".toByteArray().copyInto(out, 8)
+                "Fake drive      ".toByteArray().copyInto(out, 16)
+                "1.0 ".toByteArray().copyInto(out, 32)
+                queue(out)
+                queueStatus(0)
+            }
+            0x1A -> { // MODE SENSE(6)
+                queue(ByteArray(4))
+                queueStatus(0)
+            }
             0x03 -> { // REQUEST SENSE
                 queue(ByteArray(18))
                 queueStatus(0)

@@ -48,6 +48,8 @@ To try it locally: `gradle :app:testDebugUnitTest && bash tools/verify-images.sh
 
 ## Notes
 
+- USB transfers start small (512 bytes per command) and double after every success. After a failure the size goes back to the last one that worked. If even the smallest transfers keep failing, the app switches to queued `UsbRequest` transfers. A TEST UNIT READY keep-alive runs every 1.5 s while the drive is held, because some drives fail the first transfer after the link has been idle for a few seconds.
+
 - Everything on the drive is erased. The app asks for confirmation, but check the drive in the list.
 - The app opens the drive once and keeps it until you tap **Release drive**, unplug it or close the app. While it is held, Android does not mount it (the system may show an "unexpectedly removed" notice). Closing and re-opening the drive in quick succession makes Android mount it and start reading in between, which can leave some drives unresponsive.
 - The drive's write cache is not flushed explicitly. Wait a few seconds after "Done" before unplugging.
