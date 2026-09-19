@@ -1,0 +1,48 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">USB Format</string>
+
+    <string name="section_drive">Drive</string>
+    <string name="no_drives">No USB drive found. Connect one with an OTG cable.</string>
+    <string name="refresh">Refresh</string>
+
+    <string name="section_scheme">Partition scheme</string>
+    <string name="scheme_hint">MBR: best compatibility (TVs, car stereos, older PCs). GPT: drives over 2 TiB and modern UEFI PCs.</string>
+
+    <string name="section_fs">File system</string>
+    <string name="fs_fat32_hint">Works almost everywhere. Files up to 4 GiB.</string>
+    <string name="fs_exfat_hint">No practical file size limit. Needs Windows 7 or newer, macOS, Linux or a recent Android.</string>
+    <string name="fs_ntfs_hint">NTFS is not available yet.</string>
+
+    <string name="section_erase">Erase</string>
+    <string name="erase_quick">Quick</string>
+    <string name="erase_zero">Full (zeros)</string>
+    <string name="erase_verify">Full + test</string>
+    <string name="erase_quick_hint">Rewrites the partition table and file system. Takes seconds.</string>
+    <string name="erase_zero_hint">Also overwrites the whole drive with zeros. Large drives can take hours.</string>
+    <string name="erase_verify_hint">Writes a test pattern to the whole drive and reads it back to find bad blocks and fake capacity. Slowest.</string>
+
+    <string name="label">Volume label</string>
+    <string name="format_button">Format</string>
+
+    <string name="confirm_title">Erase this drive?</string>
+    <string name="confirm_text">All data on %1$s will be permanently deleted.</string>
+    <string name="confirm_ok">Erase and format</string>
+    <string name="cancel">Cancel</string>
+    <string name="dismiss">OK</string>
+
+    <string name="phase_zeroing">Erasing the drive…</string>
+    <string name="phase_writing">Writing test pattern…</string>
+    <string name="phase_reading">Reading back and comparing…</string>
+    <string name="phase_partitioning">Writing partition table…</string>
+    <string name="phase_formatting">Creating file system…</string>
+    <string name="progress_line">%1$d%% · %2$.1f MB/s · %3$s left</string>
+
+    <string name="status_done">Done. Wait a few seconds, then remove the drive.</string>
+    <string name="status_cancelled">Cancelled. The drive may be partly erased.</string>
+    <string name="status_failed">Failed: %1$s</string>
+    <string name="error_not_found">The drive is no longer connected.</string>
+
+    <string name="notification_title">Formatting USB drive</string>
+    <string name="notification_channel">Formatting progress</string>
+</resources>

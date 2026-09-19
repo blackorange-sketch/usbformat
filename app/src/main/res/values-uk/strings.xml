@@ -1,0 +1,48 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">USB Format</string>
+
+    <string name="section_drive">Накопичувач</string>
+    <string name="no_drives">USB-накопичувач не знайдено. Підключіть його через OTG-кабель.</string>
+    <string name="refresh">Оновити</string>
+
+    <string name="section_scheme">Схема розділів</string>
+    <string name="scheme_hint">MBR: найкраща сумісність (телевізори, магнітоли, старі ПК). GPT: накопичувачі понад 2 ТіБ і сучасні UEFI-комп\'ютери.</string>
+
+    <string name="section_fs">Файлова система</string>
+    <string name="fs_fat32_hint">Працює майже скрізь. Файли до 4 ГіБ.</string>
+    <string name="fs_exfat_hint">Без практичного обмеження розміру файлу. Потрібні Windows 7 або новіша, macOS, Linux чи свіжий Android.</string>
+    <string name="fs_ntfs_hint">NTFS поки недоступна.</string>
+
+    <string name="section_erase">Стирання</string>
+    <string name="erase_quick">Швидке</string>
+    <string name="erase_zero">Повне (нулі)</string>
+    <string name="erase_verify">Повне + тест</string>
+    <string name="erase_quick_hint">Перезаписує таблицю розділів і файлову систему. Займає секунди.</string>
+    <string name="erase_zero_hint">Додатково заповнює весь накопичувач нулями. Великі накопичувачі можуть форматуватися годинами.</string>
+    <string name="erase_verify_hint">Записує тестовий шаблон на весь накопичувач і читає його назад, щоб знайти бракові блоки та фальшивий обсяг. Найповільніше.</string>
+
+    <string name="label">Мітка тому</string>
+    <string name="format_button">Форматувати</string>
+
+    <string name="confirm_title">Стерти накопичувач?</string>
+    <string name="confirm_text">Усі дані на %1$s буде остаточно видалено.</string>
+    <string name="confirm_ok">Стерти й форматувати</string>
+    <string name="cancel">Скасувати</string>
+    <string name="dismiss">OK</string>
+
+    <string name="phase_zeroing">Стирання накопичувача…</string>
+    <string name="phase_writing">Запис тестового шаблону…</string>
+    <string name="phase_reading">Зчитування та порівняння…</string>
+    <string name="phase_partitioning">Запис таблиці розділів…</string>
+    <string name="phase_formatting">Створення файлової системи…</string>
+    <string name="progress_line">%1$d%% · %2$.1f МБ/с · залишилось %3$s</string>
+
+    <string name="status_done">Готово. Зачекайте кілька секунд і відключайте накопичувач.</string>
+    <string name="status_cancelled">Скасовано. Накопичувач міг бути стертий частково.</string>
+    <string name="status_failed">Помилка: %1$s</string>
+    <string name="error_not_found">Накопичувач більше не підключений.</string>
+
+    <string name="notification_title">Форматування USB-накопичувача</string>
+    <string name="notification_channel">Хід форматування</string>
+</resources>
