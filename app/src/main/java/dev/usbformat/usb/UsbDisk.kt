@@ -25,11 +25,8 @@ class UsbDisk(private val device: UsbMassStorageDevice) : Disk, AutoCloseable {
         } catch (e: Exception) {
             // ignored on purpose, see above
         }
-        driver = try {
-            device.blockDevice
-        } catch (e: UninitializedPropertyAccessException) {
-            throw IOException("Cannot open the USB drive", e)
-        }
+        driver = findBlockDriver(device)
+            ?: throw IOException("Cannot open the USB drive: no block device in ${device.javaClass.name}")
     }
 
     override val sectorSize: Int get() = driver.blockSize
@@ -48,4 +45,23 @@ class UsbDisk(private val device: UsbMassStorageDevice) : Disk, AutoCloseable {
     override fun close() {
         device.close()
     }
+}
+
+/**
+ * libaums keeps the raw block device in a private field and exposes only the parsed partitions.
+ * The field is found by its type rather than by name, so a rename between versions does not break this.
+ */
+private fun findBlockDriver(device: UsbMassStorageDevice): BlockDeviceDriver? {
+    var cls: Class<*>? = device.javaClass
+    while (cls != null && cls != Any::class.java) {
+        for (field in cls.declaredFields) {
+            if (BlockDeviceDriver::class.java.isAssignableFrom(field.type)) {
+                field.isAccessible = true
+                val value = field.get(device)
+                if (value is BlockDeviceDriver) return value
+            }
+        }
+        cls = cls.superclass
+    }
+    return null
 }
