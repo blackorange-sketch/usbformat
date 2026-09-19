@@ -17,6 +17,9 @@ interface UsbTransport {
     fun reset()
 
     fun close()
+
+    /** Short technical description of the connection, appended to error messages. */
+    fun describe(): String = ""
 }
 
 /**
@@ -29,6 +32,7 @@ class ScsiDisk(private val transport: UsbTransport) : Disk, AutoCloseable {
         const val CBW_SIGNATURE = 0x43425355L // "USBC"
         const val CSW_SIGNATURE = 0x53425355L // "USBS"
         const val TIMEOUT_MS = 30_000
+        const val COMMAND_TIMEOUT_MS = 5_000 // sending a 31-byte command block should be instant
         const val CHUNK = 16 * 1024 // per bulk transfer; multiple of every bulk packet size
         const val MAX_COMMAND_BYTES = 64 * 1024 // per SCSI command; cheap controllers dislike more
     }
@@ -187,9 +191,18 @@ class ScsiDisk(private val transport: UsbTransport) : Disk, AutoCloseable {
         cbw[12] = if (dataIn && length > 0) 0x80.toByte() else 0
         cbw[14] = cdb.size.toByte()
         System.arraycopy(cdb, 0, cbw, 15, cdb.size)
-        if (transport.bulkOut(cbw, 0, cbw.size, TIMEOUT_MS) != cbw.size) {
+        var sent = transport.bulkOut(cbw, 0, cbw.size, COMMAND_TIMEOUT_MS)
+        if (sent != cbw.size) {
+            // A halted endpoint is the usual reason: clear it and try again, then try a full reset.
+            transport.clearHalt(false)
+            sent = transport.bulkOut(cbw, 0, cbw.size, COMMAND_TIMEOUT_MS)
+        }
+        if (sent != cbw.size) {
             transport.reset()
-            throw IOException("The drive did not accept a command")
+            sent = transport.bulkOut(cbw, 0, cbw.size, COMMAND_TIMEOUT_MS)
+        }
+        if (sent != cbw.size) {
+            throw IOException("The drive did not accept a command (${transport.describe()})")
         }
 
         var moved = 0

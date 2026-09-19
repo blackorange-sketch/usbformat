@@ -13,23 +13,34 @@ private class AndroidUsbTransport(
     private val usbInterface: UsbInterface,
     private val inEndpoint: UsbEndpoint,
     private val outEndpoint: UsbEndpoint,
+    private val openLog: String,
 ) : UsbTransport {
 
-    override fun bulkOut(data: ByteArray, offset: Int, length: Int, timeoutMs: Int): Int =
-        connection.bulkTransfer(outEndpoint, data, offset, length, timeoutMs)
+    private var lastOut = 0
+    private var lastIn = 0
+    private var lastControl = 0
 
-    override fun bulkIn(buffer: ByteArray, offset: Int, length: Int, timeoutMs: Int): Int =
-        connection.bulkTransfer(inEndpoint, buffer, offset, length, timeoutMs)
+    override fun bulkOut(data: ByteArray, offset: Int, length: Int, timeoutMs: Int): Int {
+        lastOut = connection.bulkTransfer(outEndpoint, data, offset, length, timeoutMs)
+        return lastOut
+    }
+
+    override fun bulkIn(buffer: ByteArray, offset: Int, length: Int, timeoutMs: Int): Int {
+        lastIn = connection.bulkTransfer(inEndpoint, buffer, offset, length, timeoutMs)
+        return lastIn
+    }
+
+    override fun describe(): String = "$openLog; out=$lastOut in=$lastIn ctl=$lastControl"
 
     override fun clearHalt(inEndpoint: Boolean) {
         val endpoint = if (inEndpoint) this.inEndpoint else outEndpoint
         // CLEAR_FEATURE(ENDPOINT_HALT) addressed to the endpoint.
-        connection.controlTransfer(0x02, 0x01, 0, endpoint.address, null, 0, 1000)
+        lastControl = connection.controlTransfer(0x02, 0x01, 0, endpoint.address, null, 0, 1000)
     }
 
     override fun reset() {
         // Bulk-Only Mass Storage Reset, class request 0xFF addressed to the interface.
-        connection.controlTransfer(0x21, 0xFF, 0, usbInterface.id, null, 0, 1000)
+        lastControl = connection.controlTransfer(0x21, 0xFF, 0, usbInterface.id, null, 0, 1000)
         clearHalt(true)
         clearHalt(false)
     }
@@ -72,10 +83,26 @@ object UsbDisks {
             throw IOException("Cannot claim the USB interface")
         }
         // Select the Bulk-Only alternate setting (drives that also speak UAS may be in another one).
-        connection.setInterface(usbInterface)
+        val setInterfaceOk = connection.setInterface(usbInterface)
+        // Get Max LUN: drives with a single LUN may stall this, which is fine.
+        val maxLun = connection.controlTransfer(0xA1, 0xFE, 0, usbInterface.id, ByteArray(1), 1, 1000)
 
-        val transport = AndroidUsbTransport(connection, usbInterface, inEndpoint, outEndpoint)
+        val interfaces = (0 until device.interfaceCount).joinToString(",") {
+            val i = device.getInterface(it)
+            "${i.id}/${i.alternateSetting}:${i.interfaceClass}:${i.interfaceSubclass}:${i.interfaceProtocol}"
+        }
+        val openLog = "interfaces=$interfaces using ${usbInterface.id}/${usbInterface.alternateSetting}, " +
+            "out=0x%02x/%d in=0x%02x/%d, setIf=%b lun=%d".format(
+                outEndpoint.address, outEndpoint.maxPacketSize,
+                inEndpoint.address, inEndpoint.maxPacketSize,
+                setInterfaceOk, maxLun,
+            )
+
+        val transport = AndroidUsbTransport(connection, usbInterface, inEndpoint, outEndpoint, openLog)
         try {
+            // Start from a known state: Bulk-Only reset, then clear both endpoints.
+            transport.reset()
+            Thread.sleep(100)
             return ScsiDisk(transport)
         } catch (e: Throwable) {
             transport.close()
