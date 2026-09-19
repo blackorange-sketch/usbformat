@@ -11,6 +11,7 @@ import android.hardware.usb.UsbConstants
 import android.hardware.usb.UsbDevice
 import android.hardware.usb.UsbManager
 import android.os.Build
+import android.widget.Toast
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -22,6 +23,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
@@ -53,9 +55,13 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import dev.usbformat.fmt.DriveInfo
@@ -65,6 +71,7 @@ import dev.usbformat.fmt.Inspector
 import dev.usbformat.fmt.Options
 import dev.usbformat.fmt.Scheme
 import dev.usbformat.fmt.TableType
+import dev.usbformat.log.AppLog
 import dev.usbformat.usb.UsbDisks
 import java.util.concurrent.atomic.AtomicBoolean
 import kotlin.concurrent.thread
@@ -205,8 +212,12 @@ class MainActivity : ComponentActivity() {
             info = InfoState.Loading
             thread(name = "usb-inspect") {
                 info = try {
-                    InfoState.Ready(UsbDisks.open(usb, device).use { Inspector.inspect(it) })
+                    AppLog.log("inspect: reading $id")
+                    val result = UsbDisks.open(usb, device, 8_000).use { Inspector.inspect(it) }
+                    AppLog.log("inspect: ${result.table}, ${result.partitions.size} partition(s), ${result.sectorCount} sectors")
+                    InfoState.Ready(result)
                 } catch (e: Throwable) {
+                    AppLog.log("inspect FAILED: ${e.javaClass.simpleName}: ${e.message}")
                     InfoState.Failed(e.message ?: e.javaClass.simpleName)
                 } finally {
                     inspecting.set(false)
@@ -403,6 +414,8 @@ private fun MainScreen(
                     Text(stringResource(R.string.format_button))
                 }
             }
+
+            LogPanel()
         }
     }
 
@@ -529,4 +542,40 @@ private fun summary(info: DriveInfo): String {
     val unknown = stringResource(R.string.fs_unknown)
     val fs = info.partitions.joinToString(" + ") { it.fs ?: unknown }.ifEmpty { "-" }
     return "${tableName(info.table)} · $fs · ${formatSize(info.sectorCount * info.sectorSize)}"
+}
+
+
+@Composable
+private fun LogPanel() {
+    val context = LocalContext.current
+    val clipboard = LocalClipboardManager.current
+    val version by AppLog.version.collectAsStateWithLifecycle()
+    val text = remember(version) { AppLog.tail(150) }
+    val scroll = rememberScrollState()
+    LaunchedEffect(version) { scroll.scrollTo(scroll.maxValue) }
+
+    Section(stringResource(R.string.section_log)) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .heightIn(max = 260.dp)
+                .verticalScroll(scroll),
+        ) {
+            Text(
+                text = text.ifEmpty { stringResource(R.string.log_empty) },
+                style = MaterialTheme.typography.bodySmall.copy(
+                    fontFamily = FontFamily.Monospace,
+                    fontSize = 11.sp,
+                    lineHeight = 14.sp,
+                ),
+            )
+        }
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            OutlinedButton(onClick = {
+                clipboard.setText(AnnotatedString(AppLog.text()))
+                Toast.makeText(context, R.string.log_copied, Toast.LENGTH_SHORT).show()
+            }) { Text(stringResource(R.string.log_copy)) }
+            OutlinedButton(onClick = { AppLog.clear() }) { Text(stringResource(R.string.log_clear)) }
+        }
+    }
 }

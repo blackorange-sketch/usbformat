@@ -57,4 +57,10 @@
     <string name="info_reread">Прочитати ще раз</string>
     <string name="info_before">Було: %1$s</string>
     <string name="fs_unknown">невідома</string>
+
+    <string name="section_log">Журнал</string>
+    <string name="log_copy">Копіювати журнал</string>
+    <string name="log_clear">Очистити</string>
+    <string name="log_copied">Журнал скопійовано</string>
+    <string name="log_empty">Поки порожньо</string>
 </resources>

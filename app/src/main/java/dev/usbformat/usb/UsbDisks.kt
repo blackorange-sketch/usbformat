@@ -6,6 +6,7 @@ import android.hardware.usb.UsbDeviceConnection
 import android.hardware.usb.UsbEndpoint
 import android.hardware.usb.UsbInterface
 import android.hardware.usb.UsbManager
+import dev.usbformat.log.AppLog
 import java.io.IOException
 
 private class AndroidUsbTransport(
@@ -56,7 +57,7 @@ object UsbDisks {
      * Opens a USB Mass Storage device for raw sector access. USB permission must already be granted.
      * Claiming the interface makes Android unmount the drive until it is closed again.
      */
-    fun open(manager: UsbManager, device: UsbDevice): ScsiDisk {
+    fun open(manager: UsbManager, device: UsbDevice, ioTimeoutMs: Int = 30_000): ScsiDisk {
         var chosen: UsbInterface? = null
         for (i in 0 until device.interfaceCount) {
             val candidate = device.getInterface(i)
@@ -98,12 +99,14 @@ object UsbDisks {
                 setInterfaceOk, maxLun,
             )
 
+        AppLog.log("usb: $openLog")
         val transport = AndroidUsbTransport(connection, usbInterface, inEndpoint, outEndpoint, openLog)
         try {
             // Start from a known state: Bulk-Only reset, then clear both endpoints.
             transport.reset()
+            AppLog.log("usb: reset done (${transport.describe()})")
             Thread.sleep(100)
-            return ScsiDisk(transport)
+            return ScsiDisk(transport, ioTimeoutMs)
         } catch (e: Throwable) {
             transport.close()
             throw e

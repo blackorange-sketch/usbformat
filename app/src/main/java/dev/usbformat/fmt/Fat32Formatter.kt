@@ -2,6 +2,7 @@ package dev.usbformat.fmt
 
 import dev.usbformat.disk.Disk
 import dev.usbformat.disk.MIB
+import dev.usbformat.log.AppLog
 
 /** Quick FAT32 formatter. Works for any volume size, not only up to 32 GiB like Windows. */
 object Fat32Formatter {
@@ -59,6 +60,9 @@ object Fat32Formatter {
             clusters = clustersFor(spc, reserved, fat)
         }
 
+        AppLog.log(
+            "fat32: cluster=${spc * ss} B reserved=$reserved fat=$fat sectors (x2) clusters=$clusters total=$total sectors",
+        )
         val labelBytes = fatLabel(label)
         val volumeId = System.nanoTime() and 0xFFFFFFFFL
 

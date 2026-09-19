@@ -57,4 +57,10 @@
     <string name="info_reread">Read again</string>
     <string name="info_before">Before: %1$s</string>
     <string name="fs_unknown">unknown</string>
+
+    <string name="section_log">Log</string>
+    <string name="log_copy">Copy log</string>
+    <string name="log_clear">Clear</string>
+    <string name="log_copied">Log copied</string>
+    <string name="log_empty">Nothing yet</string>
 </resources>

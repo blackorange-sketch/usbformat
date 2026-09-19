@@ -2,6 +2,7 @@ package dev.usbformat.fmt
 
 import dev.usbformat.disk.Disk
 import dev.usbformat.disk.MIB
+import dev.usbformat.log.AppLog
 import java.io.ByteArrayOutputStream
 
 /** Quick exFAT formatter: boot regions, FAT, allocation bitmap, up-case table and an empty root directory. */
@@ -43,6 +44,10 @@ object ExFatFormatter {
         val rootCluster = upcaseCluster + upcaseClusters
         val used = bitmapClusters + upcaseClusters + 1
         require(used <= clusterCount) { "The volume is too small for exFAT" }
+        AppLog.log(
+            "exfat: cluster=$clusterBytes B fatOffset=$fatOffset fatLength=$fatLength heapOffset=$heapOffset " +
+                "clusters=$clusterCount total=$total sectors",
+        )
 
         val start = region.startLba
         fun clusterLba(cluster: Long): Long = start + heapOffset + (cluster - 2) * spc

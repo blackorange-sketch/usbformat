@@ -1,6 +1,7 @@
 package dev.usbformat.fmt
 
 import dev.usbformat.disk.Disk
+import dev.usbformat.log.AppLog
 
 data class Options(
     val scheme: Scheme,
@@ -13,6 +14,10 @@ data class Options(
 object FormatJob {
 
     fun run(disk: Disk, options: Options, cancel: Cancel, progress: ProgressCallback): Region {
+        AppLog.log(
+            "format: scheme=${options.scheme} fs=${options.fs} erase=${options.mode} label='${options.label}' " +
+                "disk=${disk.sectorCount} sectors of ${disk.sectorSize} bytes",
+        )
         when (options.mode) {
             EraseMode.QUICK -> Unit
             EraseMode.ZERO -> Eraser.zeroAll(disk, cancel, progress)
@@ -21,14 +26,18 @@ object FormatJob {
         cancel.check()
 
         progress(Phase.PARTITIONING, 0, 0)
+        AppLog.log("writing the partition table")
         val region = Partitioner.create(disk, options.scheme, options.fs)
+        AppLog.log("partition: start=${region.startLba} sectors=${region.sectors}")
 
         progress(Phase.FORMATTING, 0, 0)
         when (options.fs) {
             Fs.FAT32 -> Fat32Formatter.format(disk, region, options.label)
             Fs.EXFAT -> ExFatFormatter.format(disk, region, options.label)
         }
+        AppLog.log("flushing")
         disk.flush()
+        AppLog.log("format finished")
         return region
     }
 }

@@ -21,6 +21,8 @@ import dev.usbformat.fmt.Options
 import dev.usbformat.fmt.Phase
 import dev.usbformat.fmt.Scheme
 import android.hardware.usb.UsbManager
+import dev.usbformat.disk.LoggingDisk
+import dev.usbformat.log.AppLog
 import dev.usbformat.usb.UsbDisks
 import java.io.IOException
 import java.util.concurrent.CancellationException
@@ -84,6 +86,7 @@ class FormatService : Service() {
     private fun runJob(deviceName: String, options: Options) {
         val cancel = Cancel()
         FormatState.cancel = cancel
+        AppLog.log("job started: device=$deviceName $options")
         val wakeLock = (getSystemService(POWER_SERVICE) as PowerManager)
             .newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "usbformat:job")
         wakeLock.setReferenceCounted(false)
@@ -94,7 +97,8 @@ class FormatService : Service() {
             val device = manager.deviceList[deviceName]
                 ?: throw IOException(getString(R.string.error_not_found))
 
-            UsbDisks.open(manager, device).use { disk ->
+            UsbDisks.open(manager, device).use { usbDisk ->
+                val disk = LoggingDisk(usbDisk)
                 var currentPhase: Phase? = null
                 var phaseStart = 0L
                 var phaseStartDone = 0L
@@ -121,10 +125,16 @@ class FormatService : Service() {
                     }
                 }
             }
+            AppLog.log("job finished OK")
             FormatState.status.value = FormatStatus.Done
         } catch (e: CancellationException) {
+            AppLog.log("job cancelled")
             FormatState.status.value = FormatStatus.Cancelled
         } catch (e: Throwable) {
+            AppLog.log(
+                "job FAILED: ${e.javaClass.simpleName}: ${e.message}\n" +
+                    e.stackTrace.take(6).joinToString("\n") { "  at $it" },
+            )
             FormatState.status.value = FormatStatus.Failed(e.message ?: e.javaClass.simpleName)
         } finally {
             if (wakeLock.isHeld) wakeLock.release()
