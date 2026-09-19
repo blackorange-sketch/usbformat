@@ -63,4 +63,7 @@
     <string name="log_clear">Очистити</string>
     <string name="log_copied">Журнал скопійовано</string>
     <string name="log_empty">Поки порожньо</string>
+
+    <string name="session_held">Застосунок утримує накопичувач, тому Android його не монтує. Відпустіть його (або витягніть), коли закінчите.</string>
+    <string name="release_button">Відпустити накопичувач</string>
 </resources>

@@ -1,6 +1,7 @@
 package dev.usbformat
 
 import dev.usbformat.fmt.Cancel
+import dev.usbformat.fmt.DriveInfo
 import dev.usbformat.fmt.Phase
 import kotlinx.coroutines.flow.MutableStateFlow
 
@@ -23,6 +24,8 @@ sealed interface FormatStatus {
 /** Process-wide state shared by the service (writer) and the UI (reader). */
 object FormatState {
     val status = MutableStateFlow<FormatStatus>(FormatStatus.Idle)
+    val info = MutableStateFlow<InfoState>(InfoState.None)
+    val infoBefore = MutableStateFlow<DriveInfo?>(null)
 
     @Volatile
     var cancel = Cancel()

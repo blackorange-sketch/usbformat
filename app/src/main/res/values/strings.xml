@@ -63,4 +63,7 @@
     <string name="log_clear">Clear</string>
     <string name="log_copied">Log copied</string>
     <string name="log_empty">Nothing yet</string>
+
+    <string name="session_held">The app is holding the drive, so Android does not mount it. Release it (or unplug it) when you are done.</string>
+    <string name="release_button">Release drive</string>
 </resources>

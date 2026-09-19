@@ -23,7 +23,7 @@ import dev.usbformat.fmt.Scheme
 import android.hardware.usb.UsbManager
 import dev.usbformat.disk.LoggingDisk
 import dev.usbformat.log.AppLog
-import dev.usbformat.usb.UsbDisks
+import dev.usbformat.usb.UsbSession
 import java.io.IOException
 import java.util.concurrent.CancellationException
 import kotlin.concurrent.thread
@@ -97,7 +97,8 @@ class FormatService : Service() {
             val device = manager.deviceList[deviceName]
                 ?: throw IOException(getString(R.string.error_not_found))
 
-            UsbDisks.open(manager, device).use { usbDisk ->
+            run {
+                val usbDisk = UsbSession.acquire(manager, device, 30_000)
                 val disk = LoggingDisk(usbDisk)
                 var currentPhase: Phase? = null
                 var phaseStart = 0L
@@ -125,7 +126,7 @@ class FormatService : Service() {
                     }
                 }
             }
-            AppLog.log("job finished OK")
+            AppLog.log("job finished OK (the drive stays claimed by the app until released or unplugged)")
             FormatState.status.value = FormatStatus.Done
         } catch (e: CancellationException) {
             AppLog.log("job cancelled")
@@ -136,6 +137,7 @@ class FormatService : Service() {
                     e.stackTrace.take(6).joinToString("\n") { "  at $it" },
             )
             FormatState.status.value = FormatStatus.Failed(e.message ?: e.javaClass.simpleName)
+            UsbSession.release() // start from a clean connection next time
         } finally {
             if (wakeLock.isHeld) wakeLock.release()
             stopForeground(STOP_FOREGROUND_REMOVE)

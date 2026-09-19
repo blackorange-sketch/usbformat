@@ -30,13 +30,14 @@ interface UsbTransport {
  */
 class ScsiDisk(
     private val transport: UsbTransport,
-    private val ioTimeoutMs: Int = 30_000,
+    var ioTimeoutMs: Int = 30_000,
 ) : Disk, AutoCloseable {
 
     private companion object {
         const val CBW_SIGNATURE = 0x43425355L // "USBC"
         const val CSW_SIGNATURE = 0x53425355L // "USBS"
         const val COMMAND_TIMEOUT_MS = 5_000 // sending a 31-byte command block should be instant
+        const val INIT_TIMEOUT_MS = 5_000 // while waiting for the drive to come up
         const val CHUNK = 16 * 1024 // per bulk transfer; multiple of every bulk packet size
         const val MAX_COMMAND_BYTES = 64 * 1024 // per SCSI command; cheap controllers dislike more
         const val MIN_COMMAND_BYTES = 4 * 1024 // where the size stops shrinking after repeated errors
@@ -50,6 +51,7 @@ class ScsiDisk(
     private var tag = 1L
     private var readWritesLogged = 0
     private var maxCommandBytes = MAX_COMMAND_BYTES
+    private var initializing = true
 
     override val sectorSize: Int
     override val sectorCount: Long
@@ -64,6 +66,7 @@ class ScsiDisk(
         sectorSize = blockSize
         sectorCount = blocks
         log("capacity: $blocks sectors of $blockSize bytes")
+        initializing = false
     }
 
     override fun read(lba: Long, count: Int): ByteArray {
@@ -117,6 +120,8 @@ class ScsiDisk(
 
     private fun log(message: String) = AppLog.log("scsi: $message")
 
+    private fun timeoutMs(): Int = if (initializing) INIT_TIMEOUT_MS else ioTimeoutMs
+
     private fun maxSectors(): Int = maxOf(1, maxCommandBytes / sectorSize)
 
     /** After repeated errors, retry with smaller commands: some controllers choke on large transfers. */
@@ -169,10 +174,16 @@ class ScsiDisk(
 
     private fun waitUntilReady() {
         for (attempt in 0 until 10) {
-            val r = execute(ByteArray(6), true, null, 0, 0) // TEST UNIT READY
-            if (r.status == 0) return
-            requestSense()
-            if (attempt < 9) Thread.sleep(200)
+            try {
+                val r = execute(ByteArray(6), true, null, 0, 0) // TEST UNIT READY
+                if (r.status == 0) return
+                requestSense()
+            } catch (e: IOException) {
+                // Right after the drive was taken over from Android it can need a moment (and a reset) to answer.
+                log("not ready yet (attempt ${attempt + 1}): ${e.message}")
+                if (attempt >= 3) throw e
+            }
+            if (attempt < 9) Thread.sleep(300)
         }
         log("the drive never reported ready; continuing anyway")
     }
@@ -259,9 +270,9 @@ class ScsiDisk(
             while (moved < length) {
                 val want = minOf(CHUNK, length - moved)
                 val n = if (dataIn) {
-                    transport.bulkIn(data, offset + moved, want, ioTimeoutMs)
+                    transport.bulkIn(data, offset + moved, want, timeoutMs())
                 } else {
-                    transport.bulkOut(data, offset + moved, want, ioTimeoutMs)
+                    transport.bulkOut(data, offset + moved, want, timeoutMs())
                 }
                 if (n < 0) {
                     log("${opName(op)}: data phase error (result $n) after $moved of $length bytes")
@@ -278,16 +289,16 @@ class ScsiDisk(
         }
 
         val csw = ByteArray(13)
-        var got = transport.bulkIn(csw, 0, csw.size, ioTimeoutMs)
+        var got = transport.bulkIn(csw, 0, csw.size, timeoutMs())
         if (got != csw.size) {
             log("${opName(op)}: status read returned $got; clearing halt and reading again")
             transport.clearHalt(true)
-            got = transport.bulkIn(csw, 0, csw.size, ioTimeoutMs)
+            got = transport.bulkIn(csw, 0, csw.size, timeoutMs())
         }
         if (got == csw.size && getLe(csw, 0, 4) == CSW_SIGNATURE && getLe(csw, 4, 4) != myTag) {
             // Most likely a leftover status block from an earlier command; the real one should follow.
             log("${opName(op)}: stale status block (tag ${getLe(csw, 4, 4)}, expected $myTag); reading again")
-            got = transport.bulkIn(csw, 0, csw.size, ioTimeoutMs)
+            got = transport.bulkIn(csw, 0, csw.size, timeoutMs())
         }
         if (got != csw.size || getLe(csw, 0, 4) != CSW_SIGNATURE || getLe(csw, 4, 4) != myTag) {
             log(

@@ -27,6 +27,8 @@ app/src/main/java/dev/usbformat/
   fmt/Inspector.kt        reads the partition table and file systems of a drive
   usb/ScsiDisk.kt         SCSI over Bulk-Only Transport as a Disk (plain JVM, tested with a fake drive)
   usb/UsbDisks.kt         Android USB Host transport for it
+  usb/UsbSession.kt       keeps one drive open while the app works with it
+  log/AppLog.kt           on-screen, copyable log
   FormatService.kt        foreground service
   MainActivity.kt         Compose UI
 ```
@@ -47,7 +49,7 @@ To try it locally: `gradle :app:testDebugUnitTest && bash tools/verify-images.sh
 ## Notes
 
 - Everything on the drive is erased. The app asks for confirmation, but check the drive in the list.
-- While the app owns the drive, Android unmounts it (the system may show an "unexpectedly removed" notice). Replug it after formatting.
+- The app opens the drive once and keeps it until you tap **Release drive**, unplug it or close the app. While it is held, Android does not mount it (the system may show an "unexpectedly removed" notice). Closing and re-opening the drive in quick succession makes Android mount it and start reading in between, which can leave some drives unresponsive.
 - The drive's write cache is not flushed explicitly. Wait a few seconds after "Done" before unplugging.
 - FAT32 labels are ASCII only; exFAT labels can be any Unicode text.
 - Android 15 limits `dataSync` foreground services to 6 hours per day.

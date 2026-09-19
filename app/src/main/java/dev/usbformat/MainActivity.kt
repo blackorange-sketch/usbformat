@@ -72,7 +72,7 @@ import dev.usbformat.fmt.Options
 import dev.usbformat.fmt.Scheme
 import dev.usbformat.fmt.TableType
 import dev.usbformat.log.AppLog
-import dev.usbformat.usb.UsbDisks
+import dev.usbformat.usb.UsbSession
 import java.util.concurrent.atomic.AtomicBoolean
 import kotlin.concurrent.thread
 
@@ -87,8 +87,6 @@ class MainActivity : ComponentActivity() {
     private lateinit var usb: UsbManager
     private var drives by mutableStateOf(emptyList<Drive>())
     private var afterPermission: (() -> Unit)? = null
-    private var info by mutableStateOf<InfoState>(InfoState.None)
-    private var infoBefore by mutableStateOf<DriveInfo?>(null)
     private var inspectedId: String? = null
     private val inspecting = AtomicBoolean(false)
 
@@ -101,9 +99,13 @@ class MainActivity : ComponentActivity() {
                 if (granted) {
                     next?.invoke()
                 } else {
-                    info = InfoState.None
+                    FormatState.info.value = InfoState.None
                 }
             } else {
+                if (intent.action == UsbManager.ACTION_USB_DEVICE_DETACHED) {
+                    thread(name = "usb-release") { UsbSession.release() }
+                    FormatState.info.value = InfoState.None
+                }
                 refresh()
             }
         }
@@ -131,6 +133,9 @@ class MainActivity : ComponentActivity() {
         setContent {
             AppTheme {
                 val status by FormatState.status.collectAsStateWithLifecycle()
+                val info by FormatState.info.collectAsStateWithLifecycle()
+                val infoBefore by FormatState.infoBefore.collectAsStateWithLifecycle()
+                val sessionOpen by UsbSession.isOpen.collectAsStateWithLifecycle()
                 MainScreen(
                     drives = drives,
                     status = status,
@@ -138,6 +143,8 @@ class MainActivity : ComponentActivity() {
                     info = info,
                     infoBefore = infoBefore,
                     onInspect = { id -> inspect(id) },
+                    sessionOpen = sessionOpen,
+                    onRelease = { releaseSession() },
                     onFormat = { id, options -> startFormat(id, options) },
                     onCancel = { FormatState.cancel.requested = true },
                     onDismiss = { FormatState.status.value = FormatStatus.Idle },
@@ -153,7 +160,15 @@ class MainActivity : ComponentActivity() {
 
     override fun onDestroy() {
         unregisterReceiver(usbEvents)
+        if (isFinishing && FormatState.status.value !is FormatStatus.Running) {
+            thread(name = "usb-release") { UsbSession.release() }
+        }
         super.onDestroy()
+    }
+
+    private fun releaseSession() {
+        thread(name = "usb-release") { UsbSession.release() }
+        FormatState.info.value = InfoState.None
     }
 
     private fun refresh() {
@@ -205,19 +220,20 @@ class MainActivity : ComponentActivity() {
         val device = usb.deviceList[id] ?: return
         if (inspectedId != id) {
             inspectedId = id
-            infoBefore = null
+            FormatState.infoBefore.value = null
         }
         withPermission(device) {
             if (!inspecting.compareAndSet(false, true)) return@withPermission
-            info = InfoState.Loading
+            FormatState.info.value = InfoState.Loading
             thread(name = "usb-inspect") {
-                info = try {
+                FormatState.info.value = try {
                     AppLog.log("inspect: reading $id")
-                    val result = UsbDisks.open(usb, device, 8_000).use { Inspector.inspect(it) }
+                    val result = Inspector.inspect(UsbSession.acquire(usb, device, 8_000))
                     AppLog.log("inspect: ${result.table}, ${result.partitions.size} partition(s), ${result.sectorCount} sectors")
                     InfoState.Ready(result)
                 } catch (e: Throwable) {
                     AppLog.log("inspect FAILED: ${e.javaClass.simpleName}: ${e.message}")
+                    UsbSession.release() // a stale or confused connection is better replaced
                     InfoState.Failed(e.message ?: e.javaClass.simpleName)
                 } finally {
                     inspecting.set(false)
@@ -233,7 +249,7 @@ class MainActivity : ComponentActivity() {
             return
         }
         // Remember what the drive looked like, so the result can be compared with it.
-        infoBefore = (info as? InfoState.Ready)?.info
+        FormatState.infoBefore.value = (FormatState.info.value as? InfoState.Ready)?.info
         withPermission(device) {
             ContextCompat.startForegroundService(
                 this,
@@ -270,6 +286,8 @@ private fun MainScreen(
     info: InfoState,
     infoBefore: DriveInfo?,
     onInspect: (String) -> Unit,
+    sessionOpen: Boolean,
+    onRelease: () -> Unit,
     onFormat: (String, Options) -> Unit,
     onCancel: () -> Unit,
     onDismiss: () -> Unit,
@@ -352,6 +370,10 @@ private fun MainScreen(
                             onClick = { onInspect(current.id) },
                             enabled = info !is InfoState.Loading,
                         ) { Text(stringResource(R.string.info_reread)) }
+                        if (sessionOpen) {
+                            Hint(stringResource(R.string.session_held))
+                            OutlinedButton(onClick = onRelease) { Text(stringResource(R.string.release_button)) }
+                        }
                     }
                 }
 
