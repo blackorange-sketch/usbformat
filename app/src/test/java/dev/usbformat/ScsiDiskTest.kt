@@ -13,7 +13,9 @@ import dev.usbformat.usb.UsbTransport
 import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
+import org.junit.Assert.fail
 import org.junit.Test
+import java.io.IOException
 import java.util.Random
 
 /** A tiny USB Bulk-Only drive kept in memory: parses command blocks and answers like a real device would. */
@@ -21,6 +23,8 @@ class FakeTransport(
     private val sectors: Long,
     private val blockSize: Int = 512,
     private val reportHuge: Boolean = false,
+    private var stallNextWrite: Boolean = false,
+    private val dead: Boolean = false,
 ) : UsbTransport {
     val storage = ByteArray((sectors * blockSize).toInt())
     val commands = ArrayList<Int>()
@@ -45,6 +49,14 @@ class FakeTransport(
     }
 
     override fun bulkOut(data: ByteArray, offset: Int, length: Int, timeoutMs: Int): Int {
+        if (dead) return -1
+        if (writeLeft > 0 && stallNextWrite) {
+            // The drive refuses the data phase (stall) and reports the failure in the status block.
+            stallNextWrite = false
+            writeLeft = 0
+            queueStatus(1)
+            return -1
+        }
         if (writeLeft > 0) {
             System.arraycopy(data, offset, storage, writeAt, length)
             writeAt += length
@@ -104,6 +116,7 @@ class FakeTransport(
     }
 
     override fun bulkIn(buffer: ByteArray, offset: Int, length: Int, timeoutMs: Int): Int {
+        if (dead) return -1
         val available = reply.size - replyPos
         if (available == 0) return -1
         val n = minOf(available, length)
@@ -174,6 +187,25 @@ class ScsiDiskTest {
         val data = ByteArray(200 * 1024).also { Random(2).nextBytes(it) }
         disk.write(3, data)
         assertArrayEquals(data, disk.read(3, data.size / 4096))
+    }
+
+    @Test
+    fun recoversFromAStalledWriteByUsingSmallerTransfers() {
+        val fake = FakeTransport(32768, stallNextWrite = true)
+        val disk = ScsiDisk(fake)
+        val data = ByteArray(200 * 1024).also { Random(3).nextBytes(it) }
+        disk.write(10, data)
+        assertArrayEquals(data, disk.read(10, data.size / 512))
+    }
+
+    @Test
+    fun aDeadDriveFailsWithAnIoException() {
+        try {
+            ScsiDisk(FakeTransport(1024, dead = true))
+            fail("a drive that never answers must not open")
+        } catch (e: IOException) {
+            // expected
+        }
     }
 
     @Test

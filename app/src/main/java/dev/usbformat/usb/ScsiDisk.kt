@@ -11,17 +11,26 @@ interface UsbTransport {
 
     fun bulkIn(buffer: ByteArray, offset: Int, length: Int, timeoutMs: Int): Int
 
-    /** CLEAR_FEATURE(ENDPOINT_HALT) on the bulk-in or bulk-out endpoint. */
+    /** Clears a halted (stalled) bulk endpoint on the drive and on the host side. */
     fun clearHalt(inEndpoint: Boolean)
 
-    /** Bulk-Only Mass Storage Reset followed by clearing both endpoints. */
+    /** Bulk-Only Mass Storage Reset, then clears both endpoints. */
     fun reset()
 
     fun close()
 
     /** Short technical description of the connection, appended to error messages. */
     fun describe(): String = ""
+
+    /** Resets the whole device through its port, like unplugging and replugging it. False if not possible. */
+    fun hardReset(): Boolean = false
+
+    /** GET_STATUS of a bulk endpoint: bit 0 set means halted. -1 if unavailable. */
+    fun endpointStatus(inEndpoint: Boolean): Int = -1
 }
+
+/** The drive stopped answering even after every kind of reset; it has to be unplugged and plugged in again. */
+class DriveUnresponsiveException(message: String) : IOException(message)
 
 /**
  * A USB flash drive as a [Disk]: SCSI commands (READ/WRITE, READ CAPACITY, SYNCHRONIZE CACHE)
@@ -38,9 +47,10 @@ class ScsiDisk(
         const val CSW_SIGNATURE = 0x53425355L // "USBS"
         const val COMMAND_TIMEOUT_MS = 5_000 // sending a 31-byte command block should be instant
         const val INIT_TIMEOUT_MS = 5_000 // while waiting for the drive to come up
-        const val CHUNK = 16 * 1024 // per bulk transfer; multiple of every bulk packet size
+        const val CHUNK = 16 * 1024 // per bulk transfer; a multiple of every bulk packet size
+        const val MIN_CHUNK = 1024
         const val MAX_COMMAND_BYTES = 64 * 1024 // per SCSI command; cheap controllers dislike more
-        const val MIN_COMMAND_BYTES = 4 * 1024 // where the size stops shrinking after repeated errors
+        const val MIN_COMMAND_BYTES = 4 * 1024
         const val LOGGED_READ_WRITES = 8
     }
 
@@ -51,6 +61,7 @@ class ScsiDisk(
     private var tag = 1L
     private var readWritesLogged = 0
     private var maxCommandBytes = MAX_COMMAND_BYTES
+    private var chunk = CHUNK
     private var initializing = true
 
     override val sectorSize: Int
@@ -71,34 +82,13 @@ class ScsiDisk(
 
     override fun read(lba: Long, count: Int): ByteArray {
         val out = ByteArray(count * sectorSize)
-        var done = 0
-        while (done < count) {
-            val n = minOf(count - done, maxSectors())
-            try {
-                transferSectors(false, lba + done, n, out, done * sectorSize)
-            } catch (e: IOException) {
-                if (!shrinkCommands()) throw e
-                continue
-            }
-            done += n
-        }
+        transferAll(false, lba, out, count)
         return out
     }
 
     override fun write(lba: Long, data: ByteArray, length: Int) {
         require(length % sectorSize == 0) { "Length must be a multiple of the sector size" }
-        val count = length / sectorSize
-        var done = 0
-        while (done < count) {
-            val n = minOf(count - done, maxSectors())
-            try {
-                transferSectors(true, lba + done, n, data, done * sectorSize)
-            } catch (e: IOException) {
-                if (!shrinkCommands()) throw e
-                continue
-            }
-            done += n
-        }
+        transferAll(true, lba, data, length / sectorSize)
     }
 
     /** Asks the drive to commit its write cache. Not every drive supports it, so failure is not an error. */
@@ -124,12 +114,35 @@ class ScsiDisk(
 
     private fun maxSectors(): Int = maxOf(1, maxCommandBytes / sectorSize)
 
-    /** After repeated errors, retry with smaller commands: some controllers choke on large transfers. */
-    private fun shrinkCommands(): Boolean {
-        if (maxCommandBytes <= MIN_COMMAND_BYTES) return false
+    /** After an error, retry with smaller commands and smaller USB transfers: some controllers choke on big ones. */
+    private fun shrinkTransfers(): Boolean {
+        if (maxCommandBytes <= MIN_COMMAND_BYTES && chunk <= MIN_CHUNK) return false
         maxCommandBytes = maxOf(MIN_COMMAND_BYTES, maxCommandBytes / 4)
-        log("too many errors; switching to smaller commands of $maxCommandBytes bytes")
+        chunk = maxOf(MIN_CHUNK, chunk / 4)
+        log("switching to smaller transfers: commands of $maxCommandBytes bytes, USB transfers of $chunk bytes")
         return true
+    }
+
+    private fun transferAll(write: Boolean, lba: Long, buf: ByteArray, count: Int) {
+        val what = if (write) "write" else "read"
+        var done = 0
+        var errorsAtMinimum = 0
+        while (done < count) {
+            val n = minOf(count - done, maxSectors())
+            try {
+                transferSectors(write, lba + done, n, buf, done * sectorSize)
+            } catch (e: IOException) {
+                log("$what at sector ${lba + done} failed: ${e.message}")
+                if (e is DriveUnresponsiveException) throw e
+                if (!shrinkTransfers()) {
+                    errorsAtMinimum++
+                    if (errorsAtMinimum > 2) throw e
+                }
+                Thread.sleep(300)
+                continue
+            }
+            done += n
+        }
     }
 
     private fun transferSectors(write: Boolean, lba: Long, sectors: Int, buf: ByteArray, offset: Int) {
@@ -148,15 +161,8 @@ class ScsiDisk(
         }
         val what = if (write) "write" else "read"
         val bytes = sectors * sectorSize
-        for (attempt in 0 until 3) {
-            val r = try {
-                execute(cdb, !write, buf, offset, bytes)
-            } catch (e: IOException) {
-                log("$what at sector $lba failed (attempt ${attempt + 1} of 3): ${e.message}")
-                if (attempt == 2) throw e
-                Thread.sleep(200)
-                continue
-            }
+        for (attempt in 0 until 2) {
+            val r = execute(cdb, !write, buf, offset, bytes)
             if (r.status == 0 && r.transferred == bytes) return
             val sense = requestSense()
             log(
@@ -164,7 +170,7 @@ class ScsiDisk(
                     "sense key=0x%02x asc=0x%02x ascq=0x%02x".format(sense.key, sense.asc, sense.ascq),
             )
             // A "unit attention" (media changed, bus reset) is reported once; the retry then succeeds.
-            if (sense.key == 6 && attempt < 2) continue
+            if (sense.key == 6 && attempt == 0) continue
             throw IOException(
                 "SCSI $what failed at sector $lba " +
                     "(sense key 0x%02x, code 0x%02x/0x%02x)".format(sense.key, sense.asc, sense.ascq),
@@ -181,7 +187,7 @@ class ScsiDisk(
             } catch (e: IOException) {
                 // Right after the drive was taken over from Android it can need a moment (and a reset) to answer.
                 log("not ready yet (attempt ${attempt + 1}): ${e.message}")
-                if (attempt >= 3) throw e
+                if (attempt >= 1) throw e
             }
             if (attempt < 9) Thread.sleep(300)
         }
@@ -247,28 +253,41 @@ class ScsiDisk(
         cbw[14] = cdb.size.toByte()
         System.arraycopy(cdb, 0, cbw, 15, cdb.size)
 
-        var sent = transport.bulkOut(cbw, 0, cbw.size, COMMAND_TIMEOUT_MS)
+        fun send(): Int = transport.bulkOut(cbw, 0, cbw.size, COMMAND_TIMEOUT_MS)
+
+        // Escalating recovery when the drive does not take the command block.
+        var sent = send()
         if (sent != cbw.size) {
-            // A halted endpoint is the usual reason: clear it and try again, then try a full reset.
             log("${opName(op)}: command block not accepted (result $sent); clearing halt and retrying")
             transport.clearHalt(false)
-            sent = transport.bulkOut(cbw, 0, cbw.size, COMMAND_TIMEOUT_MS)
+            sent = send()
         }
         if (sent != cbw.size) {
             log("${opName(op)}: still not accepted (result $sent); resetting")
             transport.reset()
-            sent = transport.bulkOut(cbw, 0, cbw.size, COMMAND_TIMEOUT_MS)
+            sent = send()
         }
         if (sent != cbw.size) {
-            log("${opName(op)}: rejected even after a reset (result $sent). ${transport.describe()}")
-            throw IOException("The drive did not accept a command (${transport.describe()})")
+            log("${opName(op)}: still not accepted (result $sent); resetting the whole device")
+            if (transport.hardReset()) {
+                Thread.sleep(1500)
+                sent = send()
+            } else {
+                log("a device reset is not available")
+            }
+        }
+        if (sent != cbw.size) {
+            log("${opName(op)}: rejected after every kind of reset (result $sent). ${transport.describe()}")
+            throw DriveUnresponsiveException(
+                "The drive stopped responding. Unplug it, plug it in again and retry. (${transport.describe()})",
+            )
         }
 
         var moved = 0
         if (length > 0 && data != null) {
             var failed = false
             while (moved < length) {
-                val want = minOf(CHUNK, length - moved)
+                val want = minOf(chunk, length - moved)
                 val n = if (dataIn) {
                     transport.bulkIn(data, offset + moved, want, timeoutMs())
                 } else {
@@ -285,7 +304,13 @@ class ScsiDisk(
                     break // the status block follows
                 }
             }
-            if (failed) transport.clearHalt(dataIn)
+            if (failed) {
+                log(
+                    "endpoint status: out=${transport.endpointStatus(false)} in=${transport.endpointStatus(true)} " +
+                        "(1 means halted, -1 unknown)",
+                )
+                transport.clearHalt(dataIn)
+            }
         }
 
         val csw = ByteArray(13)

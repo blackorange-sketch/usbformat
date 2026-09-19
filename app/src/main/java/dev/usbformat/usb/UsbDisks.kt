@@ -33,17 +33,46 @@ private class AndroidUsbTransport(
 
     override fun describe(): String = "$openLog; out=$lastOut in=$lastIn ctl=$lastControl"
 
+    /**
+     * CLEAR_FEATURE(ENDPOINT_HALT) only resets the drive's side. Selecting the interface again (SET_INTERFACE)
+     * makes the host controller reset its endpoint state too, which is what a proper clear-halt does.
+     */
     override fun clearHalt(inEndpoint: Boolean) {
-        val endpoint = if (inEndpoint) this.inEndpoint else outEndpoint
-        // CLEAR_FEATURE(ENDPOINT_HALT) addressed to the endpoint.
+        clearHaltOnDrive(if (inEndpoint) this.inEndpoint else outEndpoint)
+        connection.setInterface(usbInterface)
+    }
+
+    private fun clearHaltOnDrive(endpoint: UsbEndpoint) {
         lastControl = connection.controlTransfer(0x02, 0x01, 0, endpoint.address, null, 0, 1000)
     }
 
     override fun reset() {
         // Bulk-Only Mass Storage Reset, class request 0xFF addressed to the interface.
         lastControl = connection.controlTransfer(0x21, 0xFF, 0, usbInterface.id, null, 0, 1000)
-        clearHalt(true)
-        clearHalt(false)
+        connection.setInterface(usbInterface)
+        clearHaltOnDrive(inEndpoint)
+        clearHaltOnDrive(outEndpoint)
+    }
+
+    override fun endpointStatus(inEndpoint: Boolean): Int {
+        val endpoint = if (inEndpoint) this.inEndpoint else outEndpoint
+        val buffer = ByteArray(2)
+        val n = connection.controlTransfer(0x82, 0x00, 0, endpoint.address, buffer, 2, 1000)
+        return if (n == 2) buffer[0].toInt() and 0xFF else -1
+    }
+
+    /** UsbDeviceConnection.resetDevice() is looked up by name so a missing method cannot break the build. */
+    override fun hardReset(): Boolean {
+        val reset = try {
+            connection.javaClass.getMethod("resetDevice").invoke(connection) as? Boolean ?: false
+        } catch (e: Exception) {
+            false
+        }
+        if (!reset) return false
+        Thread.sleep(1500)
+        val claimed = connection.claimInterface(usbInterface, true)
+        connection.setInterface(usbInterface)
+        return claimed
     }
 
     override fun close() {
