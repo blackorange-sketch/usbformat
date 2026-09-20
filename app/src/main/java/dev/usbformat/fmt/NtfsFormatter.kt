@@ -20,6 +20,11 @@ object NtfsFormatter {
     private const val MFT_RECORDS = 128
     private const val SYSTEM_RECORDS = 16
 
+    // Owner SYSTEM, group Administrators, read/write for SYSTEM and Administrators: what mkntfs puts into the reserved records.
+    private const val RESERVED_SECURITY_DESCRIPTOR =
+        "01000480480000005400000000000000140000000200340002000000000014009f011200010100000000000512000000" +
+            "00001800" + "9f011200" + "0102000000000005200000002002000001010000000000051200000001020000000000052000000020020000"
+
     private class Extent(val lcn: Long, val clusters: Long) {
         val bytes: Long get() = clusters * 4096 // NTFS clusters here are always 4 KiB
     }
@@ -79,8 +84,8 @@ object NtfsFormatter {
         val rootRef = mftRef(5)
         val fnKeys = HashMap<Int, ByteArray>()
 
-        fun fn(record: Int, name: String, allocated: Long, size: Long, directory: Boolean = false): ByteArray {
-            val key = fileName(rootRef, name, if (directory) 0x10000006L else 0x06L, allocated, size, now)
+        fun fn(record: Int, name: String, allocated: Long, size: Long, directory: Boolean = false, extra: Long = 0): ByteArray {
+            val key = fileName(rootRef, name, (if (directory) 0x10000006L else 0x06L) or extra, allocated, size, now)
             fnKeys[record] = key
             return key
         }
@@ -148,7 +153,7 @@ object NtfsFormatter {
         )
 
         // 5: the root directory. Its index does not fit into the record, so it has one index block of its own.
-        val rootKey = fn(5, ".", INDEX_BLOCK.toLong(), INDEX_BLOCK.toLong(), directory = true)
+        val rootKey = fn(5, ".", INDEX_BLOCK.toLong(), INDEX_BLOCK.toLong(), directory = true, extra = 0x20L)
 
         // 6: $Bitmap
         records.add(ByteArray(0)) // placeholder for record 5, built below once all names are known
@@ -177,16 +182,16 @@ object NtfsFormatter {
                 resident(0x80, "", ByteArray(0))
                 nonResident(
                     0x80, "\$Bad", runList(listOf(Extent(0, nrClusters)), sparse = true), nrClusters - 1,
-                    0, nrClusters * CLUSTER, 0, sparse = true,
+                    nrClusters * CLUSTER, nrClusters * CLUSTER, 0,
                 )
             }.finish(),
         )
 
         // 9: $Secure with its stream of security descriptors and the two indexes over it
         records.add(
-            Rec(9, recordSize, 0x01).apply {
-                resident(0x10, "", stdInfo(now, 0x06, 0x100))
-                resident(0x30, "", fn(9, "\$Secure", 0, 0), indexed = true)
+            Rec(9, recordSize, 0x09).apply { // 0x08: view index present
+                resident(0x10, "", stdInfo(now, 0x20000006, 0x100))
+                resident(0x30, "", fn(9, "\$Secure", 0, 0, extra = 0x20000000L), indexed = true)
                 nonResident(
                     0x80, "\$SDS", runList(listOf(sdsExt)), sdsExt.clusters - 1,
                     sdsExt.bytes, security.sds.size.toLong(), security.sds.size.toLong(),
@@ -218,7 +223,15 @@ object NtfsFormatter {
         )
 
         // 12..15: reserved, in use, without attributes
-        for (n in 12 until SYSTEM_RECORDS) records.add(Rec(n, recordSize, 0x01).finish(links = 0))
+        for (n in 12 until SYSTEM_RECORDS) {
+            records.add(
+                Rec(n, recordSize, 0x01).apply {
+                    resident(0x10, "", stdInfo(now, 0x06, 0).copyOf(48))
+                    resident(0x50, "", hexBytes(RESERVED_SECURITY_DESCRIPTOR))
+                    resident(0x80, "", ByteArray(0))
+                }.finish(links = 0),
+            )
+        }
 
         // Now the root directory (record 5): every system file is listed in it, sorted the way NTFS sorts names.
         val listed = fnKeys.keys.sortedWith { a, b -> compareNames(nameOf(fnKeys.getValue(a)), nameOf(fnKeys.getValue(b)), upcase) }
@@ -228,7 +241,7 @@ object NtfsFormatter {
         val rootBlock = indexBlock(0, rootEntries.toByteArray())
 
         records[5] = Rec(5, recordSize, 0x03).apply {
-            resident(0x10, "", stdInfo(now, 0x06, 0x101))
+            resident(0x10, "", stdInfo(now, 0x10000026, 0x101))
             resident(0x30, "", rootKey, indexed = true)
             resident(0x90, "\$I30", indexRoot(0x30, 1, endEntry(3, childVcn = 0), true))
             nonResident(
@@ -755,3 +768,5 @@ private fun applyFixups(buf: ByteArray, usaOffset: Int) {
 }
 
 private fun roundUpInt(value: Int, unit: Int): Int = (value + unit - 1) / unit * unit
+
+private fun hexBytes(hex: String): ByteArray = ByteArray(hex.length / 2) { hex.substring(it * 2, it * 2 + 2).toInt(16).toByte() }
