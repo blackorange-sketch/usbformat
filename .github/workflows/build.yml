@@ -36,7 +36,7 @@ jobs:
 
       # ...and checks them with the real tools.
       - name: Install checkers
-        run: sudo apt-get update && sudo apt-get install -y dosfstools exfatprogs gdisk
+        run: sudo apt-get update && sudo apt-get install -y dosfstools exfatprogs gdisk ntfs-3g
 
       - name: Verify images
         run: bash tools/verify-images.sh

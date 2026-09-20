@@ -12,7 +12,7 @@
     <string name="section_fs">Файлова система</string>
     <string name="fs_fat32_hint">Працює майже скрізь. Файли до 4 ГіБ.</string>
     <string name="fs_exfat_hint">Без практичного обмеження розміру файлу. Потрібні Windows 7 або новіша, macOS, Linux чи свіжий Android.</string>
-    <string name="fs_ntfs_hint">NTFS поки недоступна.</string>
+    <string name="fs_ntfs_hint">Рідний формат Windows, без обмеження розміру файлу. Багато телевізорів, магнітол і приставок його не підтримують, а Android зазвичай не вміє на нього писати.</string>
 
     <string name="section_erase">Стирання</string>
     <string name="erase_quick">Швидке</string>

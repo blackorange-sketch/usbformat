@@ -7,7 +7,7 @@ import java.util.zip.CRC32
 
 enum class Scheme { MBR, GPT }
 
-enum class Fs { FAT32, EXFAT }
+enum class Fs { FAT32, EXFAT, NTFS }
 
 /** The single partition created on the drive, in sectors. */
 class Region(val startLba: Long, val sectors: Long, val firstSector: ByteArray = ByteArray(0))

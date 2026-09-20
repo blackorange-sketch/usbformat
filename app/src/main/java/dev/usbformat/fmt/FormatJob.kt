@@ -34,6 +34,7 @@ object FormatJob {
         when (options.fs) {
             Fs.FAT32 -> Fat32Formatter.format(disk, region, options.label)
             Fs.EXFAT -> ExFatFormatter.format(disk, region, options.label)
+            Fs.NTFS -> NtfsFormatter.format(disk, region, options.label)
         }
         if (region.firstSector.isNotEmpty()) {
             AppLog.log("writing sector 0")

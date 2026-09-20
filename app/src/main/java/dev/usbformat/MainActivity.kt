@@ -436,13 +436,27 @@ private fun MainScreen(
                             FilterChip(
                                 selected = fs == f,
                                 onClick = { fs = f },
-                                label = { Text(if (f == Fs.FAT32) "FAT32" else "exFAT") },
+                                label = {
+                                    Text(
+                                        when (f) {
+                                            Fs.FAT32 -> "FAT32"
+                                            Fs.EXFAT -> "exFAT"
+                                            Fs.NTFS -> "NTFS"
+                                        },
+                                    )
+                                },
                             )
                         }
-                        FilterChip(selected = false, onClick = { }, enabled = false, label = { Text("NTFS") })
                     }
-                    Hint(stringResource(if (fs == Fs.FAT32) R.string.fs_fat32_hint else R.string.fs_exfat_hint))
-                    Hint(stringResource(R.string.fs_ntfs_hint))
+                    Hint(
+                        stringResource(
+                            when (fs) {
+                                Fs.FAT32 -> R.string.fs_fat32_hint
+                                Fs.EXFAT -> R.string.fs_exfat_hint
+                                Fs.NTFS -> R.string.fs_ntfs_hint
+                            },
+                        ),
+                    )
                 }
 
                 Section(stringResource(R.string.section_erase)) {

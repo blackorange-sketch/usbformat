@@ -28,7 +28,7 @@ and attach it to the bug report.
 ## What it does
 
 - Partition scheme: **MBR** or **GPT**, one partition, aligned to 1 MiB
-- File system: **FAT32** (any size, not limited to 32 GiB) or **exFAT**
+- File system: **FAT32** (any size, not limited to 32 GiB), **exFAT** or **NTFS**
 - Erase modes: **quick**, **full (zeros)**, **full + test** (writes a unique pattern to every sector and reads it back:
   finds bad blocks and fake-capacity drives)
 - Shows what is on the selected drive: capacity, partition table (MBR / GPT / none) and the file system of each partition,
@@ -36,7 +36,11 @@ and attach it to the bug report.
 - Runs in a foreground service with a wake lock, so a long erase survives the screen turning off
 - Languages: English, Ukrainian
 
-Not yet: **NTFS**, writing ISO images, a bad-block scan with several patterns.
+Not yet: writing ISO images, a bad-block scan with several patterns.
+
+NTFS is written by the app itself (4 KiB clusters, NTFS 3.1). It is checked in CI with ntfs-3g's tools and by mounting it
+with the Linux kernel's NTFS driver, but it is a newer part of the app than FAT32 and exFAT: check a drive on Windows
+(`chkdsk`) before trusting it with important data.
 
 ## Building
 
@@ -47,7 +51,8 @@ Or open the folder in Android Studio and run `app`.
 
 `ImageGenerationTest` formats sparse image files for every scheme/file system combination (512 and 4096 byte sectors),
 and `ScsiDiskTest` runs the whole USB layer against an in-memory fake drive.
-The workflow then runs `sfdisk -V`, `sgdisk -v`, `fsck.fat` and `fsck.exfat` on the images (`tools/verify-images.sh`).
+The workflow then runs `sfdisk -V`, `sgdisk -v`, `fsck.fat`, `fsck.exfat` and, for NTFS, `ntfs-3g.probe`, `ntfsinfo`, `ntfsfix`
+and a mount with the kernel driver (write files, unmount, mount again, compare) on the images (`tools/verify-images.sh`).
 Locally: `gradle :app:testDebugUnitTest && bash tools/verify-images.sh`.
 
 ## Releasing
@@ -84,6 +89,7 @@ app/src/main/java/dev/usbformat/
   fmt/Partitioner.kt      MBR and GPT
   fmt/Fat32Formatter.kt   FAT32
   fmt/ExFatFormatter.kt   exFAT
+  fmt/NtfsFormatter.kt    NTFS
   fmt/Eraser.kt           zero pass and write/verify pass
   fmt/Inspector.kt        reads the partition table and file systems of a drive
   fmt/FormatJob.kt        the whole operation

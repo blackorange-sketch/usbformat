@@ -39,7 +39,14 @@ class ImageGenerationTest {
             val info = Inspector.inspect(disk)
             assertEquals(if (scheme == Scheme.GPT) TableType.GPT else TableType.MBR, info.table)
             assertEquals(1, info.partitions.size)
-            assertEquals(if (fs == Fs.FAT32) "FAT32" else "exFAT", info.partitions[0].fs)
+            assertEquals(
+                when (fs) {
+                    Fs.FAT32 -> "FAT32"
+                    Fs.EXFAT -> "exFAT"
+                    Fs.NTFS -> "NTFS"
+                },
+                info.partitions[0].fs,
+            )
             assertEquals(region.startLba, info.partitions[0].startLba)
             assertEquals(region.sectors, info.partitions[0].sectors)
             assertEquals(sizeMiB * MIB / sectorSize, info.sectorCount)

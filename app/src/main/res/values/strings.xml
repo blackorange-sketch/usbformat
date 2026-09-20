@@ -12,7 +12,7 @@
     <string name="section_fs">File system</string>
     <string name="fs_fat32_hint">Works almost everywhere. Files up to 4 GiB.</string>
     <string name="fs_exfat_hint">No practical file size limit. Needs Windows 7 or newer, macOS, Linux or a recent Android.</string>
-    <string name="fs_ntfs_hint">NTFS is not available yet.</string>
+    <string name="fs_ntfs_hint">Native Windows format, no file size limit. Many TVs, cars and game consoles cannot use it, and Android usually cannot write to it.</string>
 
     <string name="section_erase">Erase</string>
     <string name="erase_quick">Quick</string>
