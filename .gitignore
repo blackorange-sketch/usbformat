@@ -10,3 +10,6 @@ captures/
 *.aab
 *.img
 *.part
+*.jks
+*.keystore
+*.b64

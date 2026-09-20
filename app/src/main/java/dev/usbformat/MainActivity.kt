@@ -365,6 +365,7 @@ private fun MainScreen(
                 ResultLine(status, onDismiss)
 
                 Section(stringResource(R.string.section_drive)) {
+                    Hint(stringResource(R.string.usage_tip))
                     if (drives.isEmpty()) {
                         Text(stringResource(R.string.no_drives), style = MaterialTheme.typography.bodyMedium)
                     }
