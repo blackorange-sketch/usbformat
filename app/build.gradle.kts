@@ -47,6 +47,12 @@ android {
     buildFeatures {
         compose = true
     }
+
+    lint {
+        // Lint's own dependencies are downloaded from Maven Central at release time, and CI runners get throttled
+        // there (HTTP 403). Debug builds and the unit tests already cover what matters, so lint is left out.
+        checkReleaseBuilds = false
+    }
 }
 
 dependencies {
