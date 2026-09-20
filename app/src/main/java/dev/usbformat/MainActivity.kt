@@ -270,7 +270,10 @@ class MainActivity : ComponentActivity() {
                 FormatState.info.value = try {
                     AppLog.log("inspect: reading $id")
                     val result = Inspector.inspect(UsbSession.acquire(usb, device, 8_000))
-                    AppLog.log("inspect: ${result.table}, ${result.partitions.size} partition(s), ${result.sectorCount} sectors")
+                    AppLog.log(
+                        "inspect: ${result.table}, ${result.partitions.joinToString { it.fs ?: "unknown fs" }.ifEmpty { "no partitions" }}, " +
+                            "${result.sectorCount} sectors",
+                    )
                     InfoState.Ready(result)
                 } catch (e: Throwable) {
                     AppLog.log("inspect FAILED: ${e.javaClass.simpleName}: ${e.message}")

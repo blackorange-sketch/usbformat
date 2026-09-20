@@ -48,7 +48,7 @@ jobs:
 
       - name: Verify images
         run: |
-          sudo apt-get update && sudo apt-get install -y dosfstools exfatprogs gdisk ntfs-3g
+          bash tools/install-checkers.sh
           bash tools/verify-images.sh
 
       - name: Build signed release APK
