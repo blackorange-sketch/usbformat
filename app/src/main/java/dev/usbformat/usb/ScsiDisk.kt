@@ -17,6 +17,12 @@ interface UsbTransport {
     /** Bulk-Only Mass Storage Reset, then clears both endpoints. */
     fun reset()
 
+    /**
+     * Puts the host's and the drive's view of both bulk endpoints back in step: SET_INTERFACE resets the host side,
+     * clearing the halt on both endpoints resets the drive side. Doing only one half leaves them out of step.
+     */
+    fun resync() {}
+
     fun close()
 
     /** Short technical description of the connection, appended to error messages. */
@@ -331,8 +337,14 @@ class ScsiDisk(
             sent = send()
         }
         if (sent != cbw.size) {
-            log("${opName(op)}: still not accepted (result $sent); resetting")
+            log("${opName(op)}: still not accepted (result $sent); resynchronising both endpoints")
+            transport.resync()
+            sent = send()
+        }
+        if (sent != cbw.size) {
+            log("${opName(op)}: still not accepted (result $sent); Bulk-Only reset")
             transport.reset()
+            transport.resync()
             sent = send()
         }
         if (sent != cbw.size) {
@@ -387,6 +399,11 @@ class ScsiDisk(
             log("${opName(op)}: status read returned $got; clearing halt and reading again")
             transport.clearHalt(true)
             got = transport.bulkIn(csw, 0, csw.size, timeoutMs())
+        }
+        if (got != csw.size) {
+            log("${opName(op)}: status read failed again (result $got); resynchronising both endpoints")
+            transport.resync()
+            got = transport.bulkIn(csw, 0, csw.size, COMMAND_TIMEOUT_MS)
         }
         if (got == csw.size && getLe(csw, 0, 4) == CSW_SIGNATURE && getLe(csw, 4, 4) != myTag) {
             // Most likely a leftover status block from an earlier command; the real one should follow.

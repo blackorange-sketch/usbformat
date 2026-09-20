@@ -267,20 +267,35 @@ class MainActivity : ComponentActivity() {
             if (!inspecting.compareAndSet(false, true)) return@withPermission
             FormatState.info.value = InfoState.Loading
             thread(name = "usb-inspect") {
-                FormatState.info.value = try {
-                    AppLog.log("inspect: reading $id")
-                    val result = Inspector.inspect(UsbSession.acquire(usb, device, 8_000))
-                    AppLog.log(
-                        "inspect: ${result.table}, ${result.partitions.joinToString { it.fs ?: "unknown fs" }.ifEmpty { "no partitions" }}, " +
-                            "${result.sectorCount} sectors",
-                    )
-                    InfoState.Ready(result)
-                } catch (e: Throwable) {
-                    AppLog.log("inspect FAILED: ${e.javaClass.simpleName}: ${e.message}")
-                    UsbSession.release() // a stale or confused connection is better replaced
-                    InfoState.Failed(e.message ?: e.javaClass.simpleName)
+                var result: DriveInfo? = null
+                var failure: Throwable? = null
+                try {
+                    for (attempt in 1..3) {
+                        try {
+                            AppLog.log("inspect: reading $id (attempt $attempt)")
+                            // A drive that was just plugged in is being probed by Android at the same moment: let it finish.
+                            if (attempt == 1 && !UsbSession.isOpen.value) Thread.sleep(700)
+                            result = Inspector.inspect(UsbSession.acquire(usb, device, 8_000))
+                            break
+                        } catch (e: Throwable) {
+                            failure = e
+                            AppLog.log("inspect attempt $attempt FAILED: ${e.javaClass.simpleName}: ${e.message}")
+                            UsbSession.release() // a stale or confused connection is better replaced
+                            if (attempt < 3) Thread.sleep(2000)
+                        }
+                    }
                 } finally {
                     inspecting.set(false)
+                }
+                val read = result
+                FormatState.info.value = if (read != null) {
+                    AppLog.log(
+                        "inspect: ${read.table}, ${read.partitions.joinToString { it.fs ?: "unknown fs" }.ifEmpty { "no partitions" }}, " +
+                            "${read.sectorCount} sectors",
+                    )
+                    InfoState.Ready(read)
+                } else {
+                    InfoState.Failed(failure?.message ?: "unknown error")
                 }
             }
         }

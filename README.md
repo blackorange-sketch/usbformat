@@ -25,6 +25,14 @@ The phone must support USB OTG, and you need an OTG cable or adapter.
 The **Log** section at the bottom records what the app does with the drive. If something goes wrong, tap **Copy log**
 and attach it to the bug report.
 
+## Troubleshooting
+
+- **The drive is not found, or reading it fails:** unplug it and plug it in again while the app is open (see above).
+- **A file manager says "wrong folder" or keeps asking for access after you reformatted the drive:** Android file managers
+  such as Total Commander remember the access they were given to a drive under its name. Remove the old location for the
+  drive in the file manager and add it again, or give the drive a different label when formatting.
+- **Anything else:** tap **Copy log** in the app and attach the text to the bug report.
+
 ## What it does
 
 - Partition scheme: **MBR** or **GPT**, one partition, aligned to 1 MiB
@@ -38,9 +46,9 @@ and attach it to the bug report.
 
 Not yet: writing ISO images, a bad-block scan with several patterns.
 
-NTFS is written by the app itself (4 KiB clusters, NTFS 3.1). It is checked in CI with ntfs-3g's tools and by mounting it
-with the Linux kernel's NTFS driver, but it is a newer part of the app than FAT32 and exFAT: check a drive on Windows
-(`chkdsk`) before trusting it with important data.
+NTFS is written by the app itself (4 KiB clusters, NTFS 3.1). CI checks it with ntfs-3g's tools and by mounting it with both
+the Linux kernel's NTFS driver and ntfs-3g (write files, unmount, mount again, compare), and it works on Android.
+It has not been checked on Windows yet: if you can run `chkdsk` on a drive formatted by the app, please report the result.
 
 ## Building
 

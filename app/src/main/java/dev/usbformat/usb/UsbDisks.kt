@@ -34,13 +34,18 @@ private class AndroidUsbTransport(
     override fun describe(): String = "$openLog; out=$lastOut in=$lastIn ctl=$lastControl"
 
     /**
-     * CLEAR_FEATURE(ENDPOINT_HALT) only resets the drive's side. Selecting the interface again (SET_INTERFACE)
-     * makes the host controller reset its endpoint state too, which is what a proper clear-halt does.
-     * Only used once something has already gone wrong.
+     * CLEAR_FEATURE(ENDPOINT_HALT) on one endpoint of the drive. It does not touch the host's state: SET_INTERFACE would,
+     * but it resets BOTH host endpoints, so calling it after clearing only one of them left the other one out of step
+     * (an endless cycle of "not accepted" errors in the logs). Use [resync] when both sides need to be reset.
      */
     override fun clearHalt(inEndpoint: Boolean) {
         clearHaltOnDrive(if (inEndpoint) this.inEndpoint else outEndpoint)
+    }
+
+    override fun resync() {
         connection.setInterface(usbInterface)
+        clearHaltOnDrive(inEndpoint)
+        clearHaltOnDrive(outEndpoint)
     }
 
     private fun clearHaltOnDrive(endpoint: UsbEndpoint) {
@@ -132,7 +137,9 @@ object UsbDisks {
         AppLog.log("usb: $openLog")
         val transport = AndroidUsbTransport(connection, usbInterface, inEndpoint, outEndpoint, openLog)
         try {
-            // No reset here: the drive is only reset if it fails to answer (see ScsiDisk).
+            // SET_INTERFACE above reset the host's endpoint state; make the drive's match it.
+            transport.clearHalt(true)
+            transport.clearHalt(false)
             return ScsiDisk(transport, ioTimeoutMs)
         } catch (e: Throwable) {
             transport.close()
