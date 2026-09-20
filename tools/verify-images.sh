@@ -32,15 +32,16 @@ mount_test() {
   mount_it() {
     if [ "$kind" = kernel ]; then sudo mount -t ntfs3 -o loop "$img" "$mnt"; else sudo ntfs-3g "$img" "$mnt"; fi
   }
-  mount_it || { echo "mount failed"; return 1; }
-  sudo mkdir "$mnt/dir" && sudo sh -c "echo hello > '$mnt/hello.txt'" || { sudo umount "$mnt"; return 1; }
-  sudo dd if=/dev/urandom of="$mnt/dir/big.bin" bs=1M count=3 status=none || { sudo umount "$mnt"; return 1; }
-  sum=$(sudo sha256sum "$mnt/dir/big.bin" | cut -d' ' -f1)
+  show_kernel_messages() { echo "--- kernel messages about NTFS:"; sudo dmesg | grep -i ntfs | tail -n 30; }
+  mount_it || { echo "mount failed"; show_kernel_messages; return 1; }
+  sudo mkdir "$mnt/dir_$kind" && sudo sh -c "echo hello > '$mnt/hello_$kind.txt'" || { sudo umount "$mnt"; return 1; }
+  sudo dd if=/dev/urandom of="$mnt/dir_$kind/big.bin" bs=1M count=3 status=none || { sudo umount "$mnt"; return 1; }
+  sum=$(sudo sha256sum "$mnt/dir_$kind/big.bin" | cut -d' ' -f1)
   sudo ls -la "$mnt"
   sudo umount "$mnt" || return 1
   ntfsfix -n "$img" || return 1
-  mount_it || { echo "second mount failed"; return 1; }
-  if [ "$(sudo sha256sum "$mnt/dir/big.bin" | cut -d' ' -f1)" != "$sum" ]; then
+  mount_it || { echo "second mount failed"; show_kernel_messages; return 1; }
+  if [ "$(sudo sha256sum "$mnt/dir_$kind/big.bin" | cut -d' ' -f1)" != "$sum" ]; then
     echo "data read back differs"; sudo umount "$mnt"; return 1
   fi
   sudo umount "$mnt"
@@ -87,6 +88,15 @@ for part in "$dir"/*-512.part; do
       done
       ;;
   esac
+done
+
+# Files for looking at problems: kernel messages, the images (compressed) and what ntfs-3g sees in the system files.
+debug="$dir/debug"; mkdir -p "$debug"
+sudo dmesg | grep -i ntfs | tail -n 200 > "$debug/dmesg-ntfs.txt" || true
+for name in control-mkntfs.img mbr-ntfs-512.part; do
+  f="$dir/$name"; [ -f "$f" ] || continue
+  gzip -c "$f" > "$debug/$name.gz"
+  { for n in 0 1 2 3 4 5 6 7 8 9 10 11; do echo "##### inode $n"; ntfsinfo -v -i "$n" "$f" 2>&1; done; } > "$debug/$name.inodes.txt"
 done
 
 if [ "$rc" -eq 0 ]; then echo "All checks passed"; else echo "Some checks FAILED"; fi

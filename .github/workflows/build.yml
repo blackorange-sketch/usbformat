@@ -40,3 +40,11 @@ jobs:
 
       - name: Verify images
         run: bash tools/verify-images.sh
+
+      - name: Upload NTFS debug files
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ntfs-debug
+          path: app/build/test-images/debug/
+          if-no-files-found: ignore
