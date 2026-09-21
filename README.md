@@ -121,6 +121,10 @@ Everything under `fmt/`, `disk/` and `usb/ScsiDisk.kt` is plain Kotlin without A
 - FAT32 labels are ASCII only; exFAT labels can be any Unicode text.
 - Android 15 limits `dataSync` foreground services to 6 hours per day.
 
+## Roadmap
+
+Plans and ideas: [ROADMAP.md](ROADMAP.md).
+
 ## License
 
 [MIT](LICENSE).
