@@ -12,10 +12,10 @@ Ideas and decisions for the future, in the order they are meant to be done. Noth
 
 ## Next steps
 
-1. **"Report a problem" instead of the open log panel in release builds.**
-   Keep collecting the log (it lives in memory only and is never sent anywhere). Replace the panel with a button that builds one
-   text (app version, Android version, phone model, drive info, log) and opens the system share sheet, plus a separate *Copy*.
-   The panel itself stays in debug builds, or behind a switch in the settings for testers.
+1. ~~"Report a problem" instead of the open log panel in release builds.~~ **Done.** The log keeps collecting in
+   memory only. A *Report a problem* section builds one text (app version, Android version, phone model, drive info, log) and
+   opens the share sheet, plus a separate *Copy*. The raw log panel stays on in debug builds, and in release builds testers can
+   turn it on by tapping the hint seven times (remembered from then on).
 2. **Testing on many phones and drives.** The app erases data, so this comes before any wide publication.
    Ask testers to send the log; write down which drives and phones work in a compatibility list.
 3. **Write ISO images (DD mode).**

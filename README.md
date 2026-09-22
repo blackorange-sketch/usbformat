@@ -22,8 +22,9 @@ The phone must support USB OTG, and you need an OTG cable or adapter.
 > Plug the drive in while the app is open. If it was already plugged in when you opened the app, Android has probably
 > mounted it already and the app cannot take it over reliably: unplug it and plug it in again with the app open.
 
-The **Log** section at the bottom records what the app does with the drive. If something goes wrong, tap **Copy log**
-and attach it to the bug report.
+The **Report a problem** section at the bottom can send a technical report (app and phone info, the drive info, and a log
+of what the app did with the drive) through the share sheet, or copy it to the clipboard — nothing is sent automatically.
+In a debug build, or after tapping the hint there seven times, a raw scrollable log is also shown on screen.
 
 ## Troubleshooting
 
@@ -31,7 +32,7 @@ and attach it to the bug report.
 - **A file manager says "wrong folder" or keeps asking for access after you reformatted the drive:** Android file managers
   such as Total Commander remember the access they were given to a drive under its name. Remove the old location for the
   drive in the file manager and add it again, or give the drive a different label when formatting.
-- **Anything else:** tap **Copy log** in the app and attach the text to the bug report.
+- **Anything else:** use **Report a problem** in the app (see above) and attach the text to the bug report.
 
 ## What it does
 

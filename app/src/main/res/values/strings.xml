@@ -70,4 +70,12 @@
     <string name="android_mounted">Android has this drive mounted. For reliable results unplug it and plug it in again while this app is open (or eject it first in Settings, Storage).</string>
 
     <string name="usage_tip">Tip: plug the drive in while this app is open and allow access when Android asks. If it was already plugged in, unplug it and plug it in again.</string>
+
+    <string name="section_report">Report a problem</string>
+    <string name="report_hint">Sends a technical report (app and phone info, the drive info, and the log) — no personal files, nothing sent automatically.</string>
+    <string name="report_send">Send report</string>
+    <string name="report_copy">Copy report</string>
+    <string name="report_copied">Report copied</string>
+    <string name="log_panel_enabled">Log panel enabled</string>
+    <string name="log_panel_disabled">Log panel disabled</string>
 </resources>

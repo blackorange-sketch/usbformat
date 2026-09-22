@@ -28,6 +28,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.verticalScroll
@@ -513,7 +514,7 @@ private fun MainScreen(
                 }
             }
 
-            LogPanel()
+            ReportPanel(info)
         }
     }
 
@@ -642,6 +643,75 @@ private fun summary(info: DriveInfo): String {
     return "${tableName(info.table)} · $fs · ${formatSize(info.sectorCount * info.sectorSize)}"
 }
 
+
+private const val PREFS_NAME = "usbformat"
+private const val KEY_SHOW_LOG_PANEL = "show_log_panel"
+
+/** Plain technical report (not localized on purpose): app/device info, the selected drive, and the log. */
+private fun buildReport(info: InfoState): String {
+    val b = StringBuilder()
+    b.append("USB Format ${BuildConfig.VERSION_NAME} (build ${BuildConfig.VERSION_CODE}, ${if (BuildConfig.DEBUG) "debug" else "release"})\n")
+    b.append("Android ${Build.VERSION.RELEASE} (SDK ${Build.VERSION.SDK_INT}), ${Build.MANUFACTURER} ${Build.MODEL}\n")
+    when (info) {
+        is InfoState.Ready -> {
+            val d = info.info
+            val fs = d.partitions.joinToString { it.fs ?: "unknown fs" }.ifEmpty { "no partitions" }
+            b.append("Drive: ${d.table}, ${d.sectorCount} sectors of ${d.sectorSize} bytes, $fs\n")
+        }
+        is InfoState.Failed -> b.append("Drive: could not read it (${info.message})\n")
+        else -> Unit
+    }
+    b.append("\n--- log ---\n")
+    b.append(AppLog.text())
+    return b.toString()
+}
+
+/**
+ * What most people see: a short explanation and Send/Copy buttons that share a full technical report.
+ * The raw log panel is for testers: it is always on in debug builds, and in release builds it can be turned on by
+ * tapping the hint seven times (the same idea as Android's own developer-options switch), remembered from then on.
+ */
+@Composable
+private fun ReportPanel(info: InfoState) {
+    val context = LocalContext.current
+    val clipboard = LocalClipboardManager.current
+    val prefs = remember { context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE) }
+    var showLogPanel by remember { mutableStateOf(BuildConfig.DEBUG || prefs.getBoolean(KEY_SHOW_LOG_PANEL, false)) }
+    var tapsLeft by remember { mutableStateOf(7) }
+
+    Section(stringResource(R.string.section_report)) {
+        Text(
+            stringResource(R.string.report_hint),
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.clickable(enabled = !BuildConfig.DEBUG) {
+                tapsLeft--
+                if (tapsLeft <= 0) {
+                    tapsLeft = 7
+                    showLogPanel = !showLogPanel
+                    prefs.edit().putBoolean(KEY_SHOW_LOG_PANEL, showLogPanel).apply()
+                    val message = if (showLogPanel) R.string.log_panel_enabled else R.string.log_panel_disabled
+                    Toast.makeText(context, message, Toast.LENGTH_SHORT).show()
+                }
+            },
+        )
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            OutlinedButton(onClick = {
+                val send = Intent(Intent.ACTION_SEND).apply {
+                    type = "text/plain"
+                    putExtra(Intent.EXTRA_SUBJECT, "USB Format problem report")
+                    putExtra(Intent.EXTRA_TEXT, buildReport(info))
+                }
+                context.startActivity(Intent.createChooser(send, null))
+            }) { Text(stringResource(R.string.report_send)) }
+            OutlinedButton(onClick = {
+                clipboard.setText(AnnotatedString(buildReport(info)))
+                Toast.makeText(context, R.string.report_copied, Toast.LENGTH_SHORT).show()
+            }) { Text(stringResource(R.string.report_copy)) }
+        }
+    }
+    if (showLogPanel) LogPanel()
+}
 
 @Composable
 private fun LogPanel() {

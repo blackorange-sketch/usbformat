@@ -70,4 +70,12 @@
     <string name="android_mounted">Android зараз змонтував накопичувач. Для надійної роботи витягніть його й підключіть знову при відкритому застосунку (або спершу вилучіть у Налаштуваннях, Сховище).</string>
 
     <string name="usage_tip">Порада: підключайте флешку, коли застосунок відкритий, і дозвольте доступ, коли Android запитає. Якщо флешка вже була підключена, витягніть її й підключіть знову.</string>
+
+    <string name="section_report">Повідомити про проблему</string>
+    <string name="report_hint">Надсилає технічний звіт (дані про застосунок і телефон, дані про накопичувач і журнал) — жодних особистих файлів, нічого не надсилається автоматично.</string>
+    <string name="report_send">Надіслати звіт</string>
+    <string name="report_copy">Копіювати звіт</string>
+    <string name="report_copied">Звіт скопійовано</string>
+    <string name="log_panel_enabled">Панель журналу увімкнено</string>
+    <string name="log_panel_disabled">Панель журналу вимкнено</string>
 </resources>
